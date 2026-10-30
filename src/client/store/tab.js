@@ -455,6 +455,15 @@ export default Store => {
     window.store.clickBioTab(-1)
   }, 100)
 
+  Store.prototype.clickTabN = function (n) {
+    const { store } = window
+    const tab = store.tabs[n - 1]
+    if (!tab) {
+      return
+    }
+    store.clickTab(tab.id, tab.batch)
+  }
+
   Store.prototype.clickBioTab = function (diff) {
     const { store } = window
     const { tabs, activeTabId } = store
