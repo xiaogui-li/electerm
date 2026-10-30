@@ -262,4 +262,11 @@ class ShortcutControl extends React.PureComponent {
   }
 }
 
+for (let i = 1; i <= 9; i++) {
+  ShortcutControl.prototype[`gotoTab${i}Shortcut`] = throttle((e) => {
+    e.stopPropagation()
+    window.store.clickTabN(i)
+  }, 500)
+}
+
 export default shortcutExtend(ShortcutControl)
