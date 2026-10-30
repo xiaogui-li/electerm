@@ -77,6 +77,11 @@ export default () => {
       shortcut: 'ctrl+tab',
       shortcutMac: 'ctrl+tab'
     },
+    ...Array.from({ length: 9 }, (_, i) => ({
+      name: `app_gotoTab${i + 1}`,
+      shortcut: `alt+${i + 1}`,
+      shortcutMac: `alt+${i + 1}`
+    })),
     {
       name: 'terminal_clear',
       shortcut: 'ctrl+l,ctrl+shift+l',
