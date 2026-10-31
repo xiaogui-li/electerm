@@ -135,3 +135,4 @@ ftp-root
 .cursor
 .lintcache
 .npmcache
+.idea/
