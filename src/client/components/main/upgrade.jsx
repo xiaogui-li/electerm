@@ -1,6 +1,6 @@
 import { PureComponent } from 'react'
 import { CloseOutlined, MinusSquareOutlined, UpCircleOutlined } from '@ant-design/icons'
-import { Button, Select, Space } from 'antd'
+import { Button, Select } from 'antd'
 import { getLatestReleaseInfo, getLatestReleaseVersion, getDownloadUrl } from '../../common/update-check'
 import upgrade from '../../common/upgrade'
 import compare from '../../common/version-compare'
