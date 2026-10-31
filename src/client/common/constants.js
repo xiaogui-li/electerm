@@ -237,8 +237,8 @@ export const mobileBreakpoint = 600
 // must be kept in sync with setting-wrap.styl
 export const settingPanelMobileBreakpoint = 800
 export const baseUpdateCheckUrls = [
-  'https://xiaogui-li.github.io/electerm',
-  'https://gitee.com/li-zeye/electerm/raw/gh-pages'
+  'https://gitee.com/li-zeye/electerm/raw/gh-pages',
+  'https://xiaogui-li.github.io/electerm'
 ]
 export const syncTypes = buildConst([
   'github',
