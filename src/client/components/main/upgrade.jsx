@@ -26,16 +26,12 @@ const {
 } = packInfo
 
 const downloadMirrorList = [
-  'github',
-  'gh-proxy',
-  'atomgit',
-  'sourceforge',
-  'r2'
+  'github'
 ]
 
 export default class Upgrade extends PureComponent {
   state = {
-    mirror: downloadMirrorList[1]
+    mirror: downloadMirrorList[0]
   }
 
   downloadTimer = null
@@ -321,19 +317,16 @@ export default class Upgrade extends PureComponent {
       )
     }
     return (
-      <Space.Compact>
-        {this.renderMirrorSelector()}
-        <Button
-          type='primary'
-          icon={<UpCircleOutlined />}
-          loading={checkingRemoteVersion}
-          disabled={checkingRemoteVersion}
-          onClick={() => this.doUpgrade()}
-          className='mg1b'
-        >
-          {e('upgrade')}
-        </Button>
-      </Space.Compact>
+      <Button
+        type='primary'
+        icon={<UpCircleOutlined />}
+        loading={checkingRemoteVersion}
+        disabled={checkingRemoteVersion}
+        onClick={() => this.doUpgrade()}
+        className='mg1b'
+      >
+        {e('upgrade')}
+      </Button>
     )
   }
 
