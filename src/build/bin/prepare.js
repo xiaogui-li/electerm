@@ -54,6 +54,22 @@ require('fs').writeFileSync(
 )
 
 exec(`cd work/app && npm i --omit=dev && cd ${cwd}`)
+
+// Patch node-pty binding.gyp to remove SpectreMitigation requirement
+// C:\BuildTools lacks Spectre-mitigated libs (MSB8040 error)
+const bindingGypPath = resolve(__dirname, '../../../work/app/node_modules/node-pty/binding.gyp')
+try {
+  let bindingGyp = require('fs').readFileSync(bindingGypPath, 'utf8')
+  bindingGyp = bindingGyp.replace(
+    /'msvs_configuration_attributes':\s*\{\s*'SpectreMitigation':\s*'Spectre'\s*\},?\s*/g,
+    ''
+  )
+  require('fs').writeFileSync(bindingGypPath, bindingGyp)
+  echo('patched node-pty binding.gyp (removed SpectreMitigation)')
+} catch (e) {
+  echo('warning: failed to patch node-pty binding.gyp: ' + e.message)
+}
+
 rm('-rf', 'work/app/node_modules/.bin')
 // Remove axios browser/ESM builds and unnecessary files (keep only lib/ and node CJS)
 rm('-rf', 'work/app/node_modules/axios/dist/esm')
