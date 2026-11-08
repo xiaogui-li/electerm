@@ -5,7 +5,7 @@
     "assets": [
       {
         "name": "electerm-5.9.1.2-win-x64-installer.exe",
-        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.9.1.2/electerm-5.9.1.2-win-x64-installer.exe",
+        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/5.9.1.2/electerm-5.9.1.2-win-x64-installer.exe",
         "size": 116812914
       }
     ]
