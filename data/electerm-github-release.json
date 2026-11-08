@@ -1,12 +1,12 @@
 {
   "release": {
-    "body": "### 更新内容\n- 同步 upstream 5.9.1",
+    "body": "### 更新内容\n- 修复 Windows 安装包匹配问题（installSrc 改为 exe）",
     "published_at": "2026-11-08T00:00:00Z",
     "assets": [
       {
-        "name": "electerm-5.9.1.1-win-x64-installer.exe",
-        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.9.1.1/electerm-5.9.1.1-win-x64-installer.exe",
-        "size": 116812915
+        "name": "electerm-5.9.1.2-win-x64-installer.exe",
+        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.9.1.2/electerm-5.9.1.2-win-x64-installer.exe",
+        "size": 116812914
       }
     ]
   }
