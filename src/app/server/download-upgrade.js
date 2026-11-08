@@ -6,7 +6,7 @@ const fs = require('fs')
 const { resolve } = require('path')
 const _ = require('../lib/lodash.js')
 const rp = require('axios')
-const { packInfo, tempDir } = require('../common/runtime-constants')
+const { tempDir } = require('../common/runtime-constants')
 const installSrc = require('../lib/install-src')
 const { fsExport } = require('../lib/fs')
 const { createProxyAgent } = require('../lib/proxy-agent')
@@ -77,7 +77,10 @@ class Upgrade {
       mirror
     } = this.options
     const agent = createProxyAgent(proxy)
-    const releaseInfoUrl = `${packInfo.homepage}/data/electerm-github-release.json?_=${+new Date()}`
+    const releaseInfoUrls = [
+      'https://gitee.com/li-zeye/electerm/raw/gh-pages/data/electerm-github-release.json',
+      'https://xiaogui-li.github.io/electerm/data/electerm-github-release.json'
+    ]
     const filter = r => {
       return r.name.endsWith(installSrc)
     }
@@ -92,9 +95,16 @@ class Upgrade {
     //     return /mac\.dmg$/.test(r.name)
     //   }
     // }
-    const releaseInfo = await getReleaseInfo(filter, releaseInfoUrl, agent)
-      .catch(this.onError)
+    let releaseInfo
+    for (const url of releaseInfoUrls) {
+      releaseInfo = await getReleaseInfo(filter, url + '?_=' + Date.now(), agent)
+        .catch(() => null)
+      if (releaseInfo) {
+        break
+      }
+    }
     if (!releaseInfo) {
+      this.onError(new Error('Failed to fetch release info from all sources'))
       return
     }
     const localPath = resolve(tempDir, releaseInfo.name)
