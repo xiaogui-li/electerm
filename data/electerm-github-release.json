@@ -1,12 +1,12 @@
 {
   "release": {
-    "body": "### 更新内容\n- 新增 Alt+1~9 快捷键切换标签页",
-    "published_at": "2026-10-31T00:00:00Z",
+    "body": "### 更新内容\n- 同步 upstream 5.9.1",
+    "published_at": "2026-11-08T00:00:00Z",
     "assets": [
       {
-        "name": "electerm-5.8.2-win-x64-installer.exe",
-        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.8.2/electerm-5.8.2-win-x64-installer.exe",
-        "size": 119158051
+        "name": "electerm-5.9.1.1-win-x64-installer.exe",
+        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.9.1.1/electerm-5.9.1.1-win-x64-installer.exe",
+        "size": 116812915
       }
     ]
   }
