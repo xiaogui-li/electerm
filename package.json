@@ -1,6 +1,6 @@
 {
   "name": "electerm",
-  "version": "5.9.1.1",
+  "version": "5.9.1.2",
   "description": "Open-sourced terminal/ssh/sftp/telnet/serialport/RDP/VNC/Spice/ftp client(Linux, Mac, Windows, Android, HarmonyOS, iOS).",
   "main": "app.js",
   "scripts": {
@@ -74,7 +74,7 @@
     "classnames": "2.5.1",
     "cross-env": "7.0.3",
     "dotenv": "16.4.5",
-    "electerm-icons": "1.1.1",
+    "electerm-icons": "^1.1.1",
     "electron": "44.7.0",
     "electron-builder": "26.15.7",
     "filesize": "10.1.6",
