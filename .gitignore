@@ -127,6 +127,9 @@ ftp-root
 /dist-loong64
 /work-loong64
 /.claude
+
+# 本机运行时状态（gh CLI 设备标识等工具产物）
+/.local
 /AGENTS.md
 /.workbuddy
 .catpaw
