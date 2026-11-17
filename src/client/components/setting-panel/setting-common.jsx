@@ -450,6 +450,7 @@ export default class SettingCommon extends Component {
             {...pops}
           />
         </div>
+        <div className='setting-desc pd2b'>{e('onStartBookmarksDesc')}</div>
         {this.renderProxy()}
         {
           this.renderNumber('sshReadyTimeout', {

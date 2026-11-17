@@ -62,6 +62,14 @@ export default Store => {
     delete window.openTabBatch
   }
 
+  /**
+   * Open a bookmark as a new tab.
+   * @author xiaogui
+   * @since 2026-11-17 09:09:40
+   * @param {string} id the bookmark id
+   * @returns {boolean} true when the tab was opened, false when the bookmark
+   *   does not exist anymore (it was deleted after being selected)
+   */
   Store.prototype.onSelectBookmark = function (id) {
     const { store } = window
     const bookmarks = store.bookmarks
@@ -69,7 +77,9 @@ export default Store => {
       bookmarks.find(it => it.id === id)
     )
     if (!item) {
-      return
+      // the bookmark may have been deleted meanwhile. report the failure so
+      // the caller can warn and fall back, instead of silently doing nothing
+      return false
     }
     store.addTab({
       ...item,
@@ -80,6 +90,7 @@ export default Store => {
     })
 
     delete window.openTabBatch
+    return true
   }
 
   Store.prototype.openSetting = function () {
