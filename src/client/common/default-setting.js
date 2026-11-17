@@ -42,7 +42,11 @@ export default {
   defaultEditor: '',
   terminalWordSeparator: './\\()"\'-:,.;<>~!@#$%^&*|+=[]{}`~ ?',
   confirmBeforeExit: false,
+  // upstream default, kept so an upstream sync does not lose the key
   initDefaultTabOnStart: true,
+  // fork: see src/app/common/default-setting.js - the default tab is only
+  // opened on start when the user turns this switch on
+  startWithDefaultTab: false,
   screenReaderMode: false,
   autoRefreshWhenSwitchToSftp: false,
   addTimeStampToTermLog: false,
