@@ -76,7 +76,8 @@ const {
 const {
   getScreenSize,
   maximize,
-  unmaximize
+  unmaximize,
+  canSaveWindowGeometry
 } = require('./window-control')
 const { openFileWithEditor } = require('./open-file-with-editor')
 const { loadFontList } = require('./font-list')
@@ -328,6 +329,13 @@ function initIpc () {
       globalState.get('win').webContents.openDevTools()
     },
     setWindowSize: (update) => {
+      // A maximized window reports the size of the screen, not the size the
+      // user picked. Storing that would make the next launch open a
+      // screen-filling window that can no longer be restored to a normal
+      // size.
+      if (!canSaveWindowGeometry()) {
+        return
+      }
       lastStateManager.set('windowSize', update)
     },
     saveUserConfig,

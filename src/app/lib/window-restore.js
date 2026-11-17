@@ -199,6 +199,51 @@ exports.ensureWindowVisible = function (win, screen) {
   }
 }
 
+/**
+ * Work out how the window should be opened on the next launch.
+ *
+ * The maximized flag is remembered separately from the geometry: a window
+ * that was maximized when the app was closed has to be opened maximized
+ * again, while the geometry keeps describing the size the user chose
+ * before maximizing (so un-maximizing later returns to a sensible size
+ * instead of a screen-filling one).
+ *
+ * A missing flag means the very first launch, which keeps the default
+ * behaviour: the window opens maximized=false.
+ *
+ * @param {object} opts
+ * @param {boolean} opts.savedMaximized
+ * @param {object|null} opts.windowSizeLastState
+ * @param {object|null} opts.windowPosLastState
+ * @param {object} opts.screen
+ * @param {boolean} opts.isDev
+ * @param {number} opts.minWindowWidth
+ * @param {number} opts.minWindowHeight
+ * @returns {{width:number, height:number, x:number, y:number, maximized:boolean}}
+ */
+exports.resolveWindowStartup = ({
+  savedMaximized,
+  windowSizeLastState,
+  windowPosLastState,
+  screen,
+  isDev,
+  minWindowWidth,
+  minWindowHeight
+}) => {
+  const bounds = exports.restoreWindowBounds({
+    screen,
+    windowSizeLastState,
+    windowPosLastState,
+    isDev,
+    minWindowWidth,
+    minWindowHeight
+  })
+  return {
+    ...bounds,
+    maximized: savedMaximized === true
+  }
+}
+
 exports.restoreWindowBounds = ({
   screen,
   windowSizeLastState,

@@ -2,6 +2,7 @@ const { describe, it } = require('node:test')
 const assert = require('node:assert/strict')
 const {
   restoreWindowBounds,
+  resolveWindowStartup,
   isBoundsVisibleOnAnyDisplay,
   fitBoundsToWorkArea,
   createDisplayRefitter
@@ -787,5 +788,97 @@ describe('refitting a window after it is dragged onto another display', () => {
     handler()
 
     assert.deepEqual(win.calls.setBounds, [])
+  })
+})
+
+// The window remembers whether it was maximized when the app was closed, so
+// the next launch opens it the same way. The very first launch has no record
+// at all and keeps the default behaviour: a window that is not maximized.
+describe('restoring the maximized state', () => {
+  function startup ({
+    savedMaximized,
+    displays,
+    windowSizeLastState,
+    windowPosLastState
+  }) {
+    const screen = createScreen(displays)
+    const result = resolveWindowStartup({
+      savedMaximized,
+      screen,
+      windowSizeLastState,
+      windowPosLastState,
+      isDev: false,
+      minWindowWidth,
+      minWindowHeight
+    })
+    return { result, screen }
+  }
+
+  it('opens a normal window on the first launch', () => {
+    const primary = display({ x: 0, y: 0, width: 1920, height: 1080 })
+    const { result } = startup({ displays: [primary] })
+
+    assert.equal(result.maximized, false)
+    assert.deepEqual(
+      {
+        width: result.width,
+        height: result.height,
+        x: result.x,
+        y: result.y
+      },
+      { width: 1920, height: 1080, x: 0, y: 0 }
+    )
+  })
+
+  it('opens maximized when the window was maximized when the app closed', () => {
+    const primary = display({ x: 0, y: 0, width: 1920, height: 1080 })
+    const { result } = startup({
+      savedMaximized: true,
+      displays: [primary],
+      windowSizeLastState: savedSize({
+        screenWidth: 1920,
+        screenHeight: 1080
+      }),
+      windowPosLastState: { x: 100, y: 120 }
+    })
+
+    assert.equal(result.maximized, true)
+    // The geometry still describes the window the user picked: the window is
+    // maximized on top of it, not resized to the screen.
+    assert.deepEqual(
+      {
+        width: result.width,
+        height: result.height,
+        x: result.x,
+        y: result.y
+      },
+      { width: 1000, height: 700, x: 100, y: 120 }
+    )
+  })
+
+  it('opens un-maximized when the window was not maximized when the app closed', () => {
+    const primary = display({ x: 0, y: 0, width: 1920, height: 1080 })
+    const { result } = startup({
+      savedMaximized: false,
+      displays: [primary],
+      windowSizeLastState: savedSize({
+        screenWidth: 1920,
+        screenHeight: 1080
+      }),
+      windowPosLastState: { x: 100, y: 120 }
+    })
+
+    assert.equal(result.maximized, false)
+  })
+
+  it('ignores a record that is not a boolean true', () => {
+    const primary = display({ x: 0, y: 0, width: 1920, height: 1080 })
+    for (const savedMaximized of [undefined, null, 0, '', 'true']) {
+      const { result } = startup({
+        savedMaximized,
+        displays: [primary]
+      })
+      assert.equal(result.maximized, false, String(savedMaximized))
+    }
   })
 })
