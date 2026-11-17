@@ -451,6 +451,11 @@ export default class SettingCommon extends Component {
           />
         </div>
         <div className='setting-desc pd2b'>{e('onStartBookmarksDesc')}</div>
+        {
+          this.renderToggle('startWithDefaultTab', (
+            <div className='setting-desc'>{e('startWithDefaultTabDesc')}</div>
+          ))
+        }
         {this.renderProxy()}
         {
           this.renderNumber('sshReadyTimeout', {
@@ -567,7 +572,6 @@ export default class SettingCommon extends Component {
             'autoRefreshWhenSwitchToSftp',
             'showHiddenFilesOnSftpStart',
             'screenReaderMode',
-            'initDefaultTabOnStart',
             'disableConnectionHistory',
             'disableTransferHistory',
             'checkUpdateOnStart',
