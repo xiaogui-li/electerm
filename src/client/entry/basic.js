@@ -4,6 +4,7 @@
 import '../css/basic.styl'
 import '../css/mobile.styl'
 import '../common/pre'
+import { applyLocalePatch } from '../common/locale-patch'
 
 const { isDev } = window.et
 const { version } = window.pre.packInfo
@@ -46,7 +47,9 @@ async function load () {
     document.body.appendChild(rcs)
   }
   const initLocale = window.pre.runSync('getInitLocale') || {}
-  window.langMap = initLocale.langMap
+  // fork-only texts are overlaid onto the upstream language map, so that
+  // window.translate can resolve them without a new npm language pack
+  window.langMap = applyLocalePatch(initLocale.langMap)
   window.initLanguage = initLocale.language
   // Plain property access instead of lodash `get`: importing lodash-es put six
   // extra chunks in front of this file, and an ES module cannot execute until
