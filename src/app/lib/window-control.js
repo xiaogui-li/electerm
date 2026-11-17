@@ -9,7 +9,7 @@ const {
   minWindowHeight
 } = require('../common/runtime-constants')
 const globalState = require('./glob-state')
-const { restoreWindowBounds } = require('./window-restore')
+const { resolveWindowStartup } = require('./window-restore')
 
 exports.getScreenCurrent = () => {
   const rect = globalState.get('win')
@@ -35,7 +35,11 @@ exports.getScreenSize = () => {
 
 exports.maximize = () => {
   const win = globalState.get('win')
-  globalState.set('oldRectangle', win.getBounds())
+  // Keep the rectangle the window had before it was maximized: restoring it
+  // later must bring back the size the user picked, not the screen.
+  if (!win.isMaximized()) {
+    globalState.set('oldRectangle', win.getBounds())
+  }
   win.maximize()
 }
 
@@ -48,6 +52,23 @@ exports.unmaximize = () => {
   }
   globalState.get('win').unmaximize()
   globalState.get('win').setBounds(oldRectangle)
+}
+
+/**
+ * Remember whether the window was maximized, so the next launch can open it
+ * the same way.
+ *
+ * Only the main process may write this: the renderer has to guess the state
+ * from the window size, and on Windows a maximized window's bounds do not
+ * match the work area (the invisible resize border makes them larger), so
+ * the guess is wrong exactly when it matters.
+ *
+ * @author xiaogui
+ * @since 2026-11-17 15:38:24
+ * @param {boolean} maximized
+ */
+exports.setWindowMaximized = (maximized) => {
+  lastStateManager.set('windowState', { maximized: !!maximized })
 }
 
 // macOS only. After switching between apps in native fullscreen, the Spaces
@@ -80,8 +101,12 @@ exports.getWindowSize = async () => {
 exports.getWindowSizeDep = async () => {
   const windowSizeLastState = await lastStateManager.get('windowSize')
   const windowPosLastState = await lastStateManager.get('windowPos')
+  const windowState = await lastStateManager.get('windowState')
   const { screen } = require('electron')
-  return restoreWindowBounds({
+  return resolveWindowStartup({
+    // No record at all means the very first launch, which keeps the default
+    // behaviour: the window opens maximized=false.
+    savedMaximized: !!(windowState && windowState.maximized),
     screen,
     windowSizeLastState,
     windowPosLastState,
@@ -91,6 +116,26 @@ exports.getWindowSizeDep = async () => {
   })
 }
 
+/**
+ * Whether the window geometry may be stored right now.
+ *
+ * A maximized window reports the size of the screen, not the size the user
+ * picked, and sits at the corner of its display rather than where the user
+ * put it. Storing that would make the next launch open a screen-filling
+ * window that can no longer be restored to a normal size.
+ *
+ * @author xiaogui
+ * @since 2026-11-17 15:58:27
+ * @returns {boolean}
+ */
+exports.canSaveWindowGeometry = () => {
+  const win = globalState.get('win')
+  return !(win && win.isMaximized())
+}
+
 exports.setWindowPos = (pos) => {
+  if (!exports.canSaveWindowGeometry()) {
+    return
+  }
   lastStateManager.set('windowPos', pos)
 }
