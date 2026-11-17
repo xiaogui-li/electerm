@@ -1,17 +1,17 @@
 {
   "release": {
-    "body": "### 说明：本版本仅包含本仓库自身的缺陷修复，不含上游主库功能更新\n\n- 上一版（`v5.11.8.3`）已完成上游主库 `electerm/electerm` **v5.11.8** 的全部代码同步；本版本在此基础上继续维护，**不包含新的主库功能更新**，下方列出的均为本仓库（`xiaogui-li/electerm`）自身的改动。\n- 版本号采用四段式 `5.11.8.4`：前三段 `5.11.8` 对应主库版本，第 4 段用于区分本仓库自身的打包批次，**不代表新增主库功能**。\n\n---\n\n### 本版本修复（fork-specific fix）\n\n- **修复启动时未勾选书签却自动打开本地终端**：此前「在启动时打开书签」一个都没勾选时，启动仍会弹出一个本地终端标签页，看起来像「没勾选也能开」，与设置项的实际语义对不上。\n  - 现在：**勾选了书签 → 只打开这些书签；一个都没勾选 → 不再自动打开任何标签页，启动后停留在空白欢迎页。**\n  - 上一版把「用户主动留空」和「书签全部失效」当成同一种情况来降级，本版把两者彻底分开：只有勾选过、而书签全部被删掉时，才会提示并按开关降级处理。\n  - 失效提示也拆成两种结果：全部失效时若未开任何标签页，提示「启动书签全部失效，未打开任何标签页」；若按开关开了默认选项卡，则提示「启动书签全部失效，已打开默认选项卡」。\n- **修复命令行 `--init-folder` 失效**：过去该参数只是把目录交给「启动时开出的默认标签页」，默认标签页不再默认打开后，这个参数就形同虚设。现在没有标签页时会由命令行自行开出一个本地终端并落在指定目录。\n\n### 本版本增强（fork-specific）\n\n- **设置面板新增独立开关「启动时打开默认选项卡」**：默认关闭，需要时手动打开。\n  - 上一版沿用上游的「打开默认选项卡当应用启动时」，该开关默认开启，正是「没勾书签却弹出本地终端」的根源；本版改为 fork 自有开关并默认关闭，同时保留上游开关的键值以免上游同步时丢失结构。\n- **说明行同步补齐**：「在启动时打开书签」与新开关各配一行说明，讲清两者的优先关系——勾选了书签就只打开书签，新开关仅在没有勾选任何书签时生效。\n- **新增本地化补丁机制**（沿用上一版）：上游语言包是 npm 包 `@electerm/electerm-locales`，本仓库自行新增的文案无法进入该包（会导致界面直接漏出文案 key 本身）。本地补丁模块在语言表加载后叠加本仓库自有文案，其余语言自动回退英文，避免漏出原始 key。\n\n### 本仓库的定制（fork-specific）\n\n以下为本仓库相对上游主库的自有改动，仅涉及分发渠道与少量体验增强，不属于上游功能更新：\n\n- 更新检查源指向本仓库：Gitee raw（主）+ GitHub Pages（备）；安装包托管在本仓库的 GitHub Releases\n- Windows 安装包统一为 `win-x64-installer.exe`（nsis）\n- 新增 Alt+1 ~ Alt+9 快速切换第 N 个标签页（Xshell 风格）\n- 修复 app 内更新下载到错误版本的问题（下载源改用本仓库的 release JSON）\n- 打包产物补齐 node-pty 的 `conpty.dll` / `OpenConsole.exe`，Windows 本地终端可正常连接\n\n---\n\nDownload 下载: [https://github.com/xiaogui-li/electerm/releases/tag/v5.11.8.4](https://github.com/xiaogui-li/electerm/releases/tag/v5.11.8.4)\n",
-    "published_at": "2026-11-17T04:25:04Z",
+    "body": "### 说明：本版本仅包含本仓库自身的功能增强，不含上游主库功能更新\n\n- 上一版（`v5.11.8.4`）已完成上游主库 `electerm/electerm` **v5.11.8** 的全部代码同步；本版本在此基础上继续维护，**不包含新的主库功能更新**，下方列出的均为本仓库（`xiaogui-li/electerm`）自身的改动。\n- 版本号采用四段式 `5.11.8.5`：前三段 `5.11.8` 对应主库版本，第 4 段用于区分本仓库自身的打包批次，**不代表新增主库功能**。\n\n---\n\n### 本版本增强（fork-specific）\n\n- **记住窗口的最大化状态**：此前无论上次是怎么关的，窗口下次打开总是一个固定的普通大小，用户每次都要手动再点一次最大化。\n  - 现在：**上次关闭时窗口是最大化的，下次打开就仍然是最大化的**。\n  - **首次启动没有历史记录时，保持默认的非最大化行为**，不会一上来就铺满屏幕。\n- **修复窗口大小 / 位置被最大化状态冲掉**：最大化时窗口上报的尺寸是整块屏幕的尺寸、位置是屏幕原点，过去会把用户自己选好的窗口大小覆盖掉，导致「窗口大小记不住」，甚至点「还原」直接变成满屏。\n  - 现在：**最大化期间不再覆写窗口尺寸与位置**，记录下来的一直是最大化之前那个正常尺寸的窗口。\n- **顺带修好标题栏的最大化判定**：原先判断「是否最大化」是拿窗口尺寸去和屏幕尺寸比较，而 Windows 上最大化窗口的尺寸包含看不见的边框，两者永远对不上，导致判定恒为「未最大化」。\n  - 现在改为调用系统原生的窗口状态接口，**标题栏最大化 / 还原按钮的图标、双击标题栏切换最大化，都能正确反映实际状态**。\n\n### 本仓库的定制（fork-specific）\n\n以下为本仓库相对上游主库的自有改动，仅涉及分发渠道与少量体验增强，不属于上游功能更新：\n\n- 更新检查源指向本仓库：Gitee raw（主）+ GitHub Pages（备）；安装包托管在本仓库的 GitHub Releases\n- Windows 安装包统一为 `win-x64-installer.exe`（nsis）\n- 新增 Alt+1 ~ Alt+9 快速切换第 N 个标签页（Xshell 风格）\n- 修复 app 内更新下载到错误版本的问题（下载源改用本仓库的 release JSON）\n- 打包产物补齐 node-pty 的 `conpty.dll` / `OpenConsole.exe`，Windows 本地终端可正常连接\n\n---\n\nDownload 下载: [https://github.com/xiaogui-li/electerm/releases/tag/v5.11.8.5](https://github.com/xiaogui-li/electerm/releases/tag/v5.11.8.5)\n",
+    "published_at": "2026-11-17T08:19:04Z",
     "assets": [
       {
-        "name": "electerm-5.11.8.4-win-x64-installer.exe",
-        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.11.8.4/electerm-5.11.8.4-win-x64-installer.exe",
-        "size": 120015480
+        "name": "electerm-5.11.8.5-win-x64-installer.exe",
+        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.11.8.5/electerm-5.11.8.5-win-x64-installer.exe",
+        "size": 120016619
       },
       {
-        "name": "electerm-5.11.8.4-win-x64-installer.exe.blockmap",
-        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.11.8.4/electerm-5.11.8.4-win-x64-installer.exe.blockmap",
-        "size": 125889
+        "name": "electerm-5.11.8.5-win-x64-installer.exe.blockmap",
+        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.11.8.5/electerm-5.11.8.5-win-x64-installer.exe.blockmap",
+        "size": 126057
       }
     ]
   }
