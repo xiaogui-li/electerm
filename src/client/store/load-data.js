@@ -20,6 +20,8 @@ import fs from '../common/fs'
 import { parseVv, describeVv } from '../common/parse-vv'
 import { vvToTab } from '../common/vv-to-tab'
 
+const e = window.translate
+
 function getHost (argv, opts) {
   const arr = argv
   let i = arr.length - 1
@@ -229,6 +231,17 @@ export async function addTabFromCommandLine (store, opts) {
 }
 
 export default (Store) => {
+  /**
+   * Open the sessions configured for app start.
+   *
+   * A bookmark that was deleted after it got selected used to fail silently:
+   * nothing opened and no clue why. The failure is reported now, and when
+   * every selected bookmark is gone the default tab takes over, so the app
+   * never starts with a silently empty window.
+   *
+   * @author xiaogui
+   * @since 2026-11-17 09:10:20
+   */
   Store.prototype.openInitSessions = function () {
     const { store } = window
     const onStartSessions = store.config.onStartSessions
@@ -239,10 +252,24 @@ export default (Store) => {
     } else {
       // Otherwise, it's an array of bookmark IDs
       const arr = Array.isArray(onStartSessions) ? onStartSessions : []
+      let missing = 0
       for (const s of arr) {
-        store.onSelectBookmark(s)
+        if (!store.onSelectBookmark(s)) {
+          missing++
+        }
       }
-      if (!arr.length && store.config.initDefaultTabOnStart) {
+      if (missing) {
+        message.warning(
+          missing === arr.length
+            ? e('startupBookmarkAllMissing')
+            : e('startupBookmarkMissing'),
+          10
+        )
+      }
+      // no bookmark at all, or every selected one is gone: fall back to the
+      // default tab when that switch is on
+      const opened = arr.length - missing
+      if (!opened && store.config.initDefaultTabOnStart) {
         store.initFirstTab()
       }
     }
