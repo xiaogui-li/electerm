@@ -216,12 +216,15 @@ export async function addTabFromCommandLine (store, opts) {
         parsedFallback.privateKey = await window.fs.readFile(options.privateKeyPath)
       }
       store.ipcOpenTab(parsedFallback)
-    } else if (
-      options.initFolder &&
-      !(store.config.onStartSessions || []).length &&
-      store.config.initDefaultTabOnStart
-    ) {
+    } else if (options.initFolder) {
+      // The CLI asked for a terminal in this folder. Upstream only handed the
+      // folder over to the default tab that the start-session logic had
+      // opened, so with the fork default - no default tab - the option was
+      // dropped on the floor. Open the tab here when nothing else did.
       window.initFolder = options.initFolder
+      if (!store.tabs?.length) {
+        store.initFirstTab()
+      }
     }
   }
   if (options.batchOp) {
@@ -233,13 +236,21 @@ export default (Store) => {
   /**
    * Open the sessions configured for app start.
    *
+   * Upstream opened a local terminal whenever nothing was selected for the
+   * start, so an empty "open bookmarks on startup" selection looked broken:
+   * the window came up with a terminal instead of the blank welcome page.
+   * The fork therefore drives the default tab from its own switch,
+   * `startWithDefaultTab`, which is off by default - an empty selection now
+   * starts on the welcome page, and a default tab is only opened when the
+   * user asks for it.
+   *
    * A bookmark that was deleted after it got selected used to fail silently:
-   * nothing opened and no clue why. The failure is reported now, and when
-   * every selected bookmark is gone the default tab takes over, so the app
-   * never starts with a silently empty window.
+   * nothing opened and no clue why. The failure is reported now.
    *
    * @author xiaogui
    * @since 2026-11-17 09:10:20
+   * @since 2026-11-17 11:34:38 restored the upstream "nothing selected" guard
+   * and moved the default tab behind the fork switch
    */
   Store.prototype.openInitSessions = function () {
     const { store } = window
@@ -257,18 +268,23 @@ export default (Store) => {
           missing++
         }
       }
+      // The default tab only covers the case where no startup session opened
+      // anything: nothing selected at all, or every selected bookmark is gone.
+      // With the switch off (the fork default) the app starts on the blank
+      // welcome page instead of a local terminal.
+      const opened = arr.length - missing
+      const useDefaultTab = !opened && store.config.startWithDefaultTab
       if (missing) {
         message.warning(
           missing === arr.length
-            ? e('startupBookmarkAllMissing')
+            ? e(useDefaultTab
+              ? 'startupBookmarkAllMissingWithTab'
+              : 'startupBookmarkAllMissing')
             : e('startupBookmarkMissing'),
           10
         )
       }
-      // no bookmark at all, or every selected one is gone: fall back to the
-      // default tab when that switch is on
-      const opened = arr.length - missing
-      if (!opened && store.config.initDefaultTabOnStart) {
+      if (useDefaultTab) {
         store.initFirstTab()
       }
     }

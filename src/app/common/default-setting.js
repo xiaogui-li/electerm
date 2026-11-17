@@ -37,7 +37,14 @@ module.exports = exports.default = {
   defaultEditor: '',
   terminalWordSeparator: './\\()"\'-:,.;<>~!@#$%^&*|+=[]{}`~ ?',
   confirmBeforeExit: false,
+  // upstream default, kept so an upstream sync does not lose the key
   initDefaultTabOnStart: true,
+  // fork: open a default tab on start only when the user asks for it.
+  // The upstream switch above defaults to true, which opened a local
+  // terminal on every start and made an empty "open bookmarks on startup"
+  // selection look broken - the window came up with a terminal instead of
+  // the blank welcome page.
+  startWithDefaultTab: false,
   screenReaderMode: false,
   autoRefreshWhenSwitchToSftp: false,
   addTimeStampToTermLog: false,
