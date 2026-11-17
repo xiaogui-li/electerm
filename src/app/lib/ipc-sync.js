@@ -14,26 +14,17 @@ const os = require('os')
 const {
   isTest
 } = require('../common/app-props')
-const {
-  getScreenSize
-} = require('./window-control')
 const _ = require('./lodash.js')
 const { getStorageKey } = require('./storage-key')
 const widgetLoader = require('../widgets/load-widget')
 
 const isMaximized = () => {
-  const {
-    width: widthMax,
-    height: heightMax,
-    x: sx,
-    y: sy
-  } = getScreenSize()
   const win = globalState.get('win')
-  const { width, height, x, y } = win.getBounds()
-  return widthMax === width &&
-    heightMax === height &&
-    x === sx &&
-    y === sy
+  // The native state is the only reliable source: a maximized window's
+  // bounds do not match the work area on Windows (the invisible resize
+  // border makes them larger), so comparing sizes reports the wrong answer
+  // exactly when the window is maximized.
+  return !!(win && win.isMaximized())
 }
 
 module.exports = {

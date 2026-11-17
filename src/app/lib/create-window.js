@@ -10,6 +10,7 @@ const defaults = require('../common/default-setting')
 const {
   getWindowSize,
   setWindowPos,
+  setWindowMaximized,
   repairFullScreenGeometry
 } = require('./window-control')
 const {
@@ -43,7 +44,7 @@ function safeSend (win, channel, data) {
 exports.createWindow = async function (userConfig) {
   globalState.set('closeAction', 'closeApp')
   globalState.set('requireAuth', !!userConfig.hashedPassword)
-  const { width, height, x, y } = await getWindowSize()
+  const { width, height, x, y, maximized } = await getWindowSize()
   const { useSystemTitleBar = defaults.useSystemTitleBar } = userConfig
   // Windows always keeps the native frame (window controls overlay, see
   // title-bar.js), so the renderer must treat the frame as the system one there
@@ -93,6 +94,28 @@ exports.createWindow = async function (userConfig) {
   webviewHandler.init(win)
 
   globalState.set('win', win)
+
+  // The bounds the window actually ended up with (ensureWindowVisible may
+  // have moved it), kept as the restore rectangle: the restore button must
+  // bring the window back to the size the user picked, not to the minimum.
+  globalState.set('oldRectangle', win.getBounds())
+
+  // Remember whether the window is maximized, so the next launch opens it
+  // the same way. Only the main process can tell for sure: the renderer has
+  // to guess from the window size, which does not match the screen size on
+  // Windows (the invisible resize border makes the maximized bounds larger).
+  win.on('maximize', () => {
+    setWindowMaximized(true)
+  })
+  win.on('unmaximize', () => {
+    setWindowMaximized(false)
+  })
+  // A window that was maximized when the app was closed opens maximized
+  // again. On the very first launch there is no record, and the window opens
+  // with the default (not maximized) size.
+  if (maximized) {
+    win.maximize()
+  }
 
   // A backend that cannot bind its port used to leave this await pending
   // forever: window created, nothing in it, no message, app just sits there.
