@@ -12,15 +12,21 @@
  */
 
 const zhCn = {
-  onStartBookmarksDesc: '勾选书签后，启动时只打开这些书签，不再打开默认选项卡；未勾选时按「打开默认选项卡当应用启动时」开关处理',
+  onStartBookmarksDesc: '勾选的书签会在启动时自动打开；一个都不勾选时，启动后停留在空白页，不会自动打开任何标签页',
+  startWithDefaultTab: '启动时打开默认选项卡',
+  startWithDefaultTabDesc: '没有勾选任何启动书签时生效；勾选了书签就只打开书签',
   startupBookmarkMissing: '启动书签已失效，已跳过',
-  startupBookmarkAllMissing: '启动书签全部失效，已按「打开默认选项卡当应用启动时」处理'
+  startupBookmarkAllMissing: '启动书签全部失效，未打开任何标签页',
+  startupBookmarkAllMissingWithTab: '启动书签全部失效，已打开默认选项卡'
 }
 
 const enUs = {
-  onStartBookmarksDesc: 'When bookmarks are selected, only they open on start; otherwise the "open default tab on start" switch applies',
+  onStartBookmarksDesc: 'The selected bookmarks open on start; with nothing selected the app stays on the blank welcome page and opens no tab',
+  startWithDefaultTab: 'open default tab when app start',
+  startWithDefaultTabDesc: 'Applies only when no startup bookmark is selected; with bookmarks selected, only they open',
   startupBookmarkMissing: 'A startup bookmark no longer exists and was skipped',
-  startupBookmarkAllMissing: 'All startup bookmarks are gone, falling back to the "open default tab on start" switch'
+  startupBookmarkAllMissing: 'All startup bookmarks are gone, no tab was opened',
+  startupBookmarkAllMissingWithTab: 'All startup bookmarks are gone, a default tab was opened'
 }
 
 // languages without a local translation fall back to English: a readable
