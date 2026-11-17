@@ -85,6 +85,7 @@ typings/
 dist
 dist2
 dist3
+dist4
 
 # Gatsby files
 .cache/
