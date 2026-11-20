@@ -13,6 +13,14 @@ import generate from '../common/uid'
 import { noteWidgets } from '../common/credential-provider.jsx'
 import { safeGetItemJSON, safeSetItemJSON } from '../common/safe-local-storage'
 import { currentLang, localizeWidgetInfo } from '../common/widget-i18n'
+import {
+  withPersistedApiKeys
+} from '../common/widget-api-key'
+import {
+  stripApiKeys,
+  dedupeAutoRunWidgets,
+  upsertAutoRunWidget
+} from '../common/widget-auto-run-utils'
 
 const builtinNameKeys = new Map([
   ['batch-op', 'batchOperation'],
@@ -37,9 +45,30 @@ function savedWidgetConfig (widgetId) {
   return stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {}
 }
 
+// The widget manifests, as the main process reported them. Which config
+// fields hold a secret is decided by the manifest, so the launch list has to
+// know it before it can keep a key out of the db or resolve one on a start.
+const widgetConfigs = new Map()
+
+/**
+ * The manifest config entries of a widget.
+ * @param {string} widgetId the widget id
+ * @return {object[]} the config entries, empty when the widget is unknown
+ * @author xiaogui
+ * @since 2026-11-20 12:42:45
+ */
+function configsOf (widgetId) {
+  return widgetConfigs.get(widgetId) || []
+}
+
 export default Store => {
   Store.prototype.listWidgets = async () => {
     const widgets = await window.pre.runGlobalAsync('listWidgets')
+    // remember the manifests: the launch list needs them to know which config
+    // fields hold a secret
+    for (const widget of widgets || []) {
+      widgetConfigs.set(widget.id, (widget.info && widget.info.configs) || [])
+    }
     // The manifest is English; a widget may ship its own translations in
     // electerm.i18n. The language lives here, in the renderer, so apply it
     // before any panel or list sees the info object.
@@ -223,19 +252,30 @@ export default Store => {
   // Autorun has two UIs: the sidebar thunderbolt and a UI widget's own switch.
   // One idempotent setter keeps the launch list, the sidebar badge and the
   // widget's stored choice on the same value, whichever one the user used.
+  //
+  // An existing row is replaced, not kept as it was: the user can change a
+  // config field and press Run again, and the launch list has to start the
+  // widget with what was just configured -- not with the snapshot from the
+  // first launch. The secret fields are the exception: they are not written
+  // here at all, they are resolved from the widget's own key store on every
+  // start (see startAutoRunWidgets).
   Store.prototype.setWidgetAutoRun = (widgetId, enabled, config) => {
     const { store } = window
-    if (!store.autoRunWidgets) {
-      store.autoRunWidgets = []
-    }
-    const list = store.autoRunWidgets
-    const index = list.findIndex(w => w.widgetId === widgetId)
-    if (enabled && index < 0) {
-      list.push({ id: generate(), widgetId, config: deepCopy(config || {}) })
-    } else if (!enabled && index > -1) {
-      list.splice(index, 1)
-    }
-    const item = list.find(w => w.widgetId === widgetId)
+    const current = store.autoRunWidgets || []
+    const existing = current.find(w => w.widgetId === widgetId)
+    const item = enabled
+      ? {
+          id: (existing && existing.id) || generate(),
+          widgetId,
+          config: stripApiKeys(
+            configsOf(widgetId),
+            deepCopy(config || {})
+          )
+        }
+      : null
+    const next = upsertAutoRunWidget(current, widgetId, item)
+    // assigned, not mutated: the watcher writes the list to the db
+    store.autoRunWidgets = next
     const instance = store.widgetInstances.find(w => w.widgetId === widgetId)
     if (instance) {
       instance.autoRun = !!item
@@ -260,13 +300,13 @@ export default Store => {
   Store.prototype.toggleAutoRunWidget = (instance) => {
     const { store } = window
     const { widgetId, config } = instance
+    const current = store.autoRunWidgets || []
     if (instance.autoRun) {
-      const index = store.autoRunWidgets.findIndex(
-        w => w.id === instance.autoRunId
+      // every row of this widget goes, not just the one the instance points
+      // at: a second row would start the widget a second time
+      store.autoRunWidgets = current.filter(
+        w => w.id !== instance.autoRunId && w.widgetId !== widgetId
       )
-      if (index > -1) {
-        store.autoRunWidgets.splice(index, 1)
-      }
       instance.autoRun = false
       instance.autoRunId = undefined
     } else {
@@ -274,9 +314,13 @@ export default Store => {
       const item = {
         id,
         widgetId,
-        config
+        config: stripApiKeys(
+          configsOf(widgetId),
+          deepCopy(config || {})
+        )
       }
-      store.autoRunWidgets.push(item)
+      // one row per widget: an existing row of the same widget is replaced
+      store.autoRunWidgets = upsertAutoRunWidget(current, widgetId, item)
       instance.autoRun = true
       instance.autoRunId = id
     }
@@ -313,11 +357,30 @@ export default Store => {
     if (!items || !items.length) {
       return
     }
+    // the manifests decide which fields hold a secret, and they are needed
+    // before the first widget starts
+    try {
+      await window.store.listWidgets()
+    } catch (err) {
+      console.error('Failed to list widgets for autorun:', err)
+    }
+    // one row per widget: a list that holds the same widget twice would try
+    // to start it twice, and the second start is refused. The rows also lose
+    // their secret fields -- an older version wrote the key into the db, and
+    // a stale copy there would win over the saved key.
+    const cleaned = dedupeAutoRunWidgets(items).map(item => ({
+      ...item,
+      config: stripApiKeys(configsOf(item.widgetId), item.config)
+    }))
+    if (JSON.stringify(cleaned) !== JSON.stringify(items)) {
+      // assigned, not mutated: the watcher drops the extra rows from the db
+      store.autoRunWidgets = cleaned
+    }
     // A renderer that just loaded finds the instances still running in the main
     // process (refreshWidgetInstances runs first, see load-data.js): starting
     // them again would only raise "already has a running instance"
     const running = new Set(store.widgetInstances.map(i => i.widgetId))
-    for (const item of items) {
+    for (const item of cleaned) {
       if (running.has(item.widgetId)) {
         continue
       }
@@ -331,8 +394,18 @@ export default Store => {
         if (runConfig.autoRun === false) {
           continue
         }
+        const configs = configsOf(item.widgetId)
+        // The secret comes from the widget's own key store, never from the
+        // saved config: that store keeps the key the user chose across
+        // restarts, and a key generated for one launch is remembered there
+        // instead of being a new one on the next launch.
+        const finalConfig = withPersistedApiKeys(
+          item.widgetId,
+          configs,
+          stripApiKeys(configs, runConfig)
+        )
         // runWidget refreshes the instance list from the main process
-        await store.runWidget(item.widgetId, runConfig)
+        await store.runWidget(item.widgetId, finalConfig)
       } catch (err) {
         console.error(`Failed to autorun widget ${item.widgetId}:`, err)
       }

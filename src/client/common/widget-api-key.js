@@ -21,6 +21,7 @@
 
 import { nanoid } from 'nanoid'
 import { safeGetItem, safeSetItem } from './safe-local-storage'
+import { isApiKeyField } from './widget-auto-run-utils'
 
 const KEY_PREFIX = 'widget-api-key:'
 
@@ -45,18 +46,51 @@ export function generateApiKey () {
 }
 
 /**
+ * The saved keys of a widget's generated-secret fields.
+ *
+ * The run form shows them, so the field is never empty once a key exists:
+ * an empty field means "keep the saved key", and a field that always looks
+ * empty is what made the key look like something the user had to type again
+ * on every launch.
+ * @param {string} widgetId the widget the fields belong to
+ * @param {object[]} [configs] the widget manifest config entries
+ * @return {object} { fieldName: savedKey } for the fields that have one
+ * @author xiaogui
+ * @since 2026-11-20 12:42:45
+ */
+export function storedApiKeyValues (widgetId, configs) {
+  const res = {}
+  ;(configs || []).filter(isApiKeyField).forEach(c => {
+    const stored = readStoredApiKey(widgetId, c.name)
+    if (stored) {
+      res[c.name] = stored
+    }
+  })
+  return res
+}
+
+/**
  * Fill in every generated-secret field the caller left empty.
  *
  * An empty field means "use the saved key", never "no key": an unauthenticated
  * server is the vulnerability, so there is no way to ask for one. A non-empty
  * value is the user's own choice and replaces what was stored.
+ *
+ * Every start path goes through here -- the run form and the launch list --
+ * so the key the server runs with is the same one on every launch.
+ * @param {string} widgetId the widget the fields belong to
+ * @param {object[]} [configs] the widget manifest config entries
+ * @param {object} [config] the config to fill in
+ * @return {object} a copy with every generated-secret field filled
+ * @author xiaogui
+ * @since 2026-11-20 12:42:45
  */
 export function withPersistedApiKeys (widgetId, configs, config) {
-  const secretConfigs = (configs || []).filter(c => c.showGenerator)
+  const secretConfigs = (configs || []).filter(isApiKeyField)
   if (!secretConfigs.length) {
     return config
   }
-  const next = { ...config }
+  const next = { ...(config || {}) }
   for (const c of secretConfigs) {
     const typed = next[c.name]
     if (typeof typed === 'string' && typed.trim()) {
