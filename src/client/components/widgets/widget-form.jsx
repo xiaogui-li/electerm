@@ -11,6 +11,9 @@ import {
   rememberValues
 } from '../../common/widget-form-memory'
 import {
+  storedApiKeyValues
+} from '../../common/widget-api-key'
+import {
   renderConfigItem,
   configInitialValues
 } from './config-fields'
@@ -26,7 +29,11 @@ export default function WidgetForm ({ widget, onSubmit, loading, hasRunningInsta
   const widgetId = widget && widget.id
   const startValues = useMemo(() => ({
     ...configInitialValues(configs),
-    ...rememberedValues(widgetId, configs)
+    ...rememberedValues(widgetId, configs),
+    // A generated secret is shown, not asked for: an empty field means "keep
+    // the saved key", so a field that always looked empty is what made the
+    // key look like something to type again on every launch.
+    ...storedApiKeyValues(widgetId, configs)
   }), [widgetId, configs])
 
   useEffect(() => {

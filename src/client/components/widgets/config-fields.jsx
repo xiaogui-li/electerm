@@ -15,7 +15,7 @@ import React from 'react'
 import { Form, Input, InputNumber, Select, Button, Space } from 'antd'
 import { formItemLayout } from '../../common/form-layout'
 import SwitchLabel from '../common/switch'
-import { nanoid } from 'nanoid'
+import { generateApiKey } from '../../common/widget-api-key'
 
 const e = window.translate
 
@@ -156,7 +156,9 @@ export function renderConfigItem (config, form) {
             <Form.Item noStyle name={name}>
               {input}
             </Form.Item>
-            <Button onClick={() => form.setFieldValue(name, 'ett_' + nanoid())}>
+            {/* the same generator the key store uses, so a key typed here and
+                a key generated on first start look the same */}
+            <Button onClick={() => form.setFieldValue(name, generateApiKey())}>
               Generate
             </Button>
           </Space.Compact>,
