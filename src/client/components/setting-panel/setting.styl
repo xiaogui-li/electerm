@@ -16,8 +16,11 @@
   flex-wrap wrap
   gap 8px
 // extra hint text under a setting item
+// --main-light is near-white in the light theme (it is the "raised surface"
+// colour there), so a hint painted with it disappears on a light background.
+// --text-dark is readable in both themes.
 .setting-desc
-  color var(--main-light)
+  color var(--text-dark)
   font-size 12px
   line-height 1.5
 

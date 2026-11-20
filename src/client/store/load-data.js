@@ -19,6 +19,7 @@ import message from '../components/common/message'
 import fs from '../common/fs'
 import { parseVv, describeVv } from '../common/parse-vv'
 import { vvToTab } from '../common/vv-to-tab'
+import { applyLocalePatch } from '../common/locale-patch'
 
 const e = window.translate
 
@@ -315,7 +316,10 @@ export default (Store) => {
   Store.prototype.initApp = async function () {
     const { store } = window
     const globs = window.et.globs || await window.pre.runGlobalAsync('init')
-    window.langMap = globs.langMap
+    // The store gets a fresh copy of the language map, so the fork-only texts
+    // that entry/basic.js overlaid on the first one are gone by now -- the
+    // keys would come back as raw identifiers in the UI. Patch this copy too.
+    window.langMap = applyLocalePatch(globs.langMap)
     store.installSrc = globs.installSrc
     store.appPath = globs.appPath
     store.exePath = globs.exePath
