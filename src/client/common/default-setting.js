@@ -47,6 +47,9 @@ export default {
   // fork: see src/app/common/default-setting.js - the default tab is only
   // opened on start when the user turns this switch on
   startWithDefaultTab: false,
+  // fork: start every new session with the session heartbeat (the heart icon
+  // in the session toolbar) already on - upstream has no such switch
+  defaultKeepalive: false,
   screenReaderMode: false,
   autoRefreshWhenSwitchToSftp: false,
   addTimeStampToTermLog: false,
