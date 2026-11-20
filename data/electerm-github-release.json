@@ -1,17 +1,17 @@
 {
   "release": {
-    "body": "### 说明：本版本仅包含本仓库自身的功能增强，不含上游主库功能更新\n\n- 上一版（`v5.11.8.5`）已完成上游主库 `electerm/electerm` **v5.11.8** 的全部代码同步；本版本在此基础上继续维护，**不包含新的主库功能更新**，下方列出的均为本仓库（`xiaogui-li/electerm`）自身的改动。\n- 版本号采用四段式 `5.11.8.6`：前三段 `5.11.8` 对应主库版本，第 4 段用于区分本仓库自身的打包批次，**不代表新增主库功能**。\n\n---\n\n### 本版本增强（fork-specific）\n\n- **Keepalive 可以默认开启了**：此前会话工具栏里那个心形图标（Keepalive）**每个新标签页都是关闭的**，必须手动点一次才能用 —— 因为上游把这个状态当成纯运行时数据来管，新建标签页时会被明确清空。上游既没有提供任何开关，也没有任何地方可以设置它。\n  - 现在：**设置面板新增「默认开启 Keepalive」开关**（在「Keepalive 间隔」下面），打开后新开的标签页**心形图标默认就是亮的**，不用再一个个点。\n  - **书签级覆盖**：书签编辑页新增「Keepalive 模式」下拉框，三种取值：\n    - **跟随全局设置**（默认）：以设置面板的全局开关为准；\n    - **总是开启**：这个书签不管全局怎么设，连接后必定开启；\n    - **总是关闭**：这个书签即使全局开着也不开启。\n  - 优先级为 **手动点击 > 书签设置 > 全局开关** —— 你在某个标签页上手动点过心形图标（开或关），这个选择会被保留，重连也不会被覆盖。\n  - 设置开关只影响**新打开**的标签页，已有的标签页仍可以用工具栏图标随时切换。\n- **区分两套 Keepalive**：设置面板里原本就有的「Keepalive 间隔」是 **SSH 传输层探活**（用来发现已经断开的连接），与心形图标这个**会话级心跳**（定期往终端写一个空行、重置 shell 的空闲超时，防止会话被踢下线）完全是两回事，之前容易被混为一谈。现在开关的说明文字里已明确写清这一点，心形图标的悬浮提示也不再显示裸英文 key。\n\n### 本仓库的定制（fork-specific）\n\n以下为本仓库相对上游主库的自有改动，仅涉及分发渠道与少量体验增强，不属于上游功能更新：\n\n- 更新检查源指向本仓库：Gitee raw（主）+ GitHub Pages（备）；安装包托管在本仓库的 GitHub Releases\n- Windows 安装包统一为 `win-x64-installer.exe`（nsis）\n- 新增 Alt+1 ~ Alt+9 快速切换第 N 个标签页（Xshell 风格）\n- 记住窗口的最大化状态：上次关闭时是最大化，下次打开仍是最大化（首次无记录时保持默认非最大化）\n- 修复 app 内更新下载到错误版本的问题（下载源改用本仓库的 release JSON）\n- 打包产物补齐 node-pty 的 `conpty.dll` / `OpenConsole.exe`，Windows 本地终端可正常连接\n\n---\n\nDownload 下载: [https://github.com/xiaogui-li/electerm/releases/tag/v5.11.8.6](https://github.com/xiaogui-li/electerm/releases/tag/v5.11.8.6)\n",
-    "published_at": "2026-11-20T02:41:52Z",
+    "body": "### 说明：本版本仅包含本仓库自身的缺陷修复，不含上游主库功能更新\n\n- 版本号采用四段式 `5.11.8.7`：前三段 `5.11.8` 对应主库版本，第 4 段用于区分本仓库自身的打包批次，**不代表新增主库功能**。\n\n---\n\n### 本版本修复（fork-specific）\n\n- **浅色主题下设置项的说明文字显示为裸 key 且看不清**\n  - 此前 fork 新增的设置项（在启动时打开书签 / 启动时打开默认选项卡 / 默认开启 Keepalive）的说明文字，会直接显示成 `OnStartBookmarksDesc`、`StartWithDefaultTabDesc`、`DefaultKeepaliveDesc` 这样的英文标识符，而不是中文文案。\n  - 原因是应用初始化时，主进程返回了一份全新的语言包，把本地补丁覆盖掉了。补丁现在在两个入口都会生效。\n  - 另外说明文字原先用的是 `--main-light` 颜色变量 —— 这个变量在亮色主题下是接近背景色的近白色，文字在白底上根本看不见。现已改用两套主题都可读的文本色。\n\n- **MCP Server 的 apiKey 每次重启都会变，导致必须重新设置才能启动 mcpserver**\n  - 此前填写 apiKey 并开启自动启动后，下次打开 electerm 时 apiKey 会变成别的值，必须再手动设置一次才能启动 MCP 服务。\n  - 根因有三处：自动启动路径绕过了密钥存储、既读不回已保存的 key 也不记住自动生成的 key；开启自动启动时若已有记录则不会更新配置；切换开关时会不断追加重复记录。\n  - 现在自动启动与手动运行统一使用同一份密钥来源：**用户填写的 apiKey 保持不变，自动生成的 apiKey 会被记住，不再每次重启都换一个新值**。\n  - 启动列表不再保存明文 apiKey；历史遗留的明文密钥与重复的启动记录会在启动时一并清理。\n  - **apiKey 不是必填项**：留空即沿用已保存的值，运行表单会直接显示当前生效的 key，不再每次都要重新填写。\n\n---\n\n### 本仓库的定制（fork-specific）\n\n以下为本仓库相对上游主库的自有改动，仅涉及分发渠道与少量体验增强，不属于上游功能更新：\n\n- 更新检查源指向本仓库：Gitee raw（主）+ GitHub Pages（备）；安装包托管在本仓库的 GitHub Releases\n- Windows 安装包统一为 `win-x64-installer.exe`（nsis）\n- 新增 Alt+1 ~ Alt+9 快速切换第 N 个标签页（Xshell 风格）\n- 记住窗口的最大化状态：上次关闭时是最大化，下次打开仍是最大化（首次无记录时保持默认非最大化）\n- 记住会话心跳（工具栏心形图标）默认开启，支持书签级覆盖\n- 修复 app 内更新下载到错误版本的问题（下载源改用本仓库的 release JSON）\n- 打包产物补齐 node-pty 的 `conpty.dll` / `OpenConsole.exe`，Windows 本地终端可正常连接\n\n---\n\nDownload 下载: [https://github.com/xiaogui-li/electerm/releases/tag/v5.11.8.7](https://github.com/xiaogui-li/electerm/releases/tag/v5.11.8.7)\n",
+    "published_at": "2026-11-20T05:15:13Z",
     "assets": [
       {
-        "name": "electerm-5.11.8.6-win-x64-installer.exe",
-        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.11.8.6/electerm-5.11.8.6-win-x64-installer.exe",
-        "size": 120016677
+        "name": "electerm-5.11.8.7-win-x64-installer.exe",
+        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.11.8.7/electerm-5.11.8.7-win-x64-installer.exe",
+        "size": 121012655
       },
       {
-        "name": "electerm-5.11.8.6-win-x64-installer.exe.blockmap",
-        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.11.8.6/electerm-5.11.8.6-win-x64-installer.exe.blockmap",
-        "size": 126277
+        "name": "electerm-5.11.8.7-win-x64-installer.exe.blockmap",
+        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.11.8.7/electerm-5.11.8.7-win-x64-installer.exe.blockmap",
+        "size": 126647
       }
     ]
   }
