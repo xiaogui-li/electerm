@@ -17,7 +17,17 @@ const zhCn = {
   startWithDefaultTabDesc: '没有勾选任何启动书签时生效；勾选了书签就只打开书签',
   startupBookmarkMissing: '启动书签已失效，已跳过',
   startupBookmarkAllMissing: '启动书签全部失效，未打开任何标签页',
-  startupBookmarkAllMissingWithTab: '启动书签全部失效，已打开默认选项卡'
+  startupBookmarkAllMissingWithTab: '启动书签全部失效，已打开默认选项卡',
+  // the heart icon in the session toolbar. No upstream language pack has a
+  // "keepalive" key, so the tooltip used to show the bare key.
+  keepalive: 'Keepalive',
+  // fork: the session heartbeat (the heart icon), not the transport probe
+  defaultKeepalive: '默认开启 Keepalive',
+  defaultKeepaliveDesc: '新开的标签页默认打开会话心跳（工具栏里的心形图标），省得每个标签页都点一次；与下面的「Keepalive 间隔」不是一回事，后者是 SSH 传输层探活',
+  keepaliveMode: 'Keepalive 模式',
+  keepaliveModeInherit: '跟随全局设置',
+  keepaliveModeOn: '总是开启',
+  keepaliveModeOff: '总是关闭'
 }
 
 const enUs = {
@@ -26,7 +36,14 @@ const enUs = {
   startWithDefaultTabDesc: 'Applies only when no startup bookmark is selected; with bookmarks selected, only they open',
   startupBookmarkMissing: 'A startup bookmark no longer exists and was skipped',
   startupBookmarkAllMissing: 'All startup bookmarks are gone, no tab was opened',
-  startupBookmarkAllMissingWithTab: 'All startup bookmarks are gone, a default tab was opened'
+  startupBookmarkAllMissingWithTab: 'All startup bookmarks are gone, a default tab was opened',
+  keepalive: 'Keepalive',
+  defaultKeepalive: 'enable keepalive by default',
+  defaultKeepaliveDesc: 'New tabs start with the session heartbeat (the heart icon in the toolbar) already on, so it does not have to be clicked per tab. This is not the "Keepalive interval" below - that one is the SSH transport level probe',
+  keepaliveMode: 'keepalive mode',
+  keepaliveModeInherit: 'follow the global setting',
+  keepaliveModeOn: 'always on',
+  keepaliveModeOff: 'always off'
 }
 
 // languages without a local translation fall back to English: a readable
