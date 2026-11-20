@@ -955,7 +955,10 @@ export default (Store) => {
       'terminalBackgroundText',
       'terminalBackgroundTextSize',
       'terminalBackgroundTextColor',
-      'terminalBackgroundTextFontFamily'
+      'terminalBackgroundTextFontFamily',
+      // fork: the session heartbeat switch, a per user preference that
+      // belongs with the other keepalive setting
+      'defaultKeepalive'
     ]
     return pick(store.config, configSyncKeys)
   }

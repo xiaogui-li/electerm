@@ -474,6 +474,15 @@ export default class SettingCommon extends Component {
           }, e('keepaliveIntervalDesc'))
         }
         {
+          // fork: the session heartbeat (the heart icon in the session
+          // toolbar). Upstream has no switch for it - the flag is runtime
+          // state that every new tab starts without, so the icon has to be
+          // clicked once per tab.
+          this.renderToggle('defaultKeepalive', (
+            <div className='setting-desc'>{e('defaultKeepaliveDesc')}</div>
+          ))
+        }
+        {
           isWebApp
             ? null
             : this.renderNumber('opacity', {

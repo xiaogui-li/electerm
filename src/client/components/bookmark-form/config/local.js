@@ -48,6 +48,7 @@ const localConfig = {
         commonFields.fontFamily,
         commonFields.fontSize,
         commonFields.keepaliveInterval,
+        commonFields.keepaliveMode,
         commonFields.terminalBackground,
         // Exec settings - stored as flat properties on bookmark
         { type: 'execSettings' }

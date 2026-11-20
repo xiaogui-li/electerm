@@ -4,6 +4,7 @@
 import { newBookmarkIdPrefix, authTypeMap } from '../../../common/constants.js'
 import { getColorFromCategory, getIconFromCategory } from '../../../common/get-category-color.js'
 import findBookmarkGroupId from '../../../common/find-bookmark-group-id.js'
+import { defaultKeepaliveMode } from '../../../common/keepalive-default.js'
 import deepCopy from 'json-deep-copy'
 
 /**
@@ -50,7 +51,11 @@ export function getTerminalDefaults (store) {
   return {
     term: store?.config?.terminalType,
     displayRaw: false,
-    encode: 'utf-8'
+    encode: 'utf-8',
+    // fork: a fresh bookmark has no opinion about the session heartbeat (the
+    // heart icon in the toolbar) - the global switch decides until the user
+    // picks a mode for this bookmark
+    keepaliveMode: defaultKeepaliveMode()
   }
 }
 

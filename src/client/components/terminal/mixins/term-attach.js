@@ -5,6 +5,7 @@ import AttachAddon from '../attach-addon-custom.js'
 import { createTriggerManager } from '../automation/index.js'
 import { isWin } from '../../../common/constants.js'
 import { isUnsafeFilename } from '../../../common/file-drop-utils.js'
+import { resolveKeepaliveStart } from '../../../common/keepalive-default.js'
 import { createCdCommand } from '../ssh-reload-state.js'
 
 /**
@@ -23,7 +24,46 @@ export const attachMixin = {
       this.encode || this.props.tab.encode || 'utf-8'
     )
     await this.attachAddon.activate(this.term)
+    // fork: the session heartbeat (the heart icon in the toolbar) can start
+    // switched on. It has to happen here and not earlier: before the attach
+    // addon exists setKeepalive() refuses to work, and only after it the
+    // terminal really sends heartbeats.
+    this.applyKeepaliveDefault()
     this.initTriggerManager()
+  },
+
+  // Work out whether a fresh session starts with the heartbeat on, and turn
+  // it on if so.
+  //
+  // Priority: an explicit per tab state wins (the user clicked the icon or
+  // the MCP tool set it - it is the only thing that reflects the live
+  // terminal), then the bookmark override, then the global switch.
+  //
+  // The flag is mirrored onto the tab because that is what the toolbar icon
+  // renders: enabling the terminal alone would leave the icon showing "off"
+  // while the session is really sending heartbeats.
+  //
+  // @author xiaogui
+  // @since 2026-11-19 17:02:00
+  // @returns {boolean} true when the heartbeat was switched on
+  applyKeepaliveDefault () {
+    const tab = this.props.tab || {}
+    const enabled = resolveKeepaliveStart({
+      tabKeepaliveEnabled: tab.keepaliveEnabled,
+      tabKeepaliveMode: tab.keepaliveMode,
+      globalDefault: this.props.config?.defaultKeepalive
+    })
+    if (!enabled) {
+      return false
+    }
+    const result = this.setKeepalive(true)
+    if (result && !tab.keepaliveEnabled) {
+      tab.keepaliveEnabled = true
+      // keep the store copy in sync as well, in case the component holds
+      // something else than the live tab object
+      window.store.updateTab?.(tab.id, { keepaliveEnabled: true })
+    }
+    return result
   },
 
   switchEncoding (encode) {

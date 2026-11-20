@@ -45,6 +45,11 @@ module.exports = exports.default = {
   // selection look broken - the window came up with a terminal instead of
   // the blank welcome page.
   startWithDefaultTab: false,
+  // fork: start every new session with the session heartbeat (the heart icon
+  // in the session toolbar) already on. The upstream code has no such switch
+  // - the heartbeat is runtime state that every new tab starts without, so
+  // the user has to click the icon once per tab.
+  defaultKeepalive: false,
   screenReaderMode: false,
   autoRefreshWhenSwitchToSftp: false,
   addTimeStampToTermLog: false,

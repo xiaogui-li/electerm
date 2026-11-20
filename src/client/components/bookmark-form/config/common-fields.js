@@ -8,6 +8,7 @@ import {
   commonRxLineEndings
 } from '../../../common/constants'
 import defaultSettings from '../../../common/default-setting'
+import { keepaliveModeValues } from '../../../common/keepalive-default.js'
 import encodes from '../common/encodes'
 import { isEmpty } from 'lodash-es'
 import { hasCredentialProvider } from '../../../common/credential-provider.jsx'
@@ -203,6 +204,24 @@ export const commonFields = {
     }
   },
 
+  // fork: per bookmark override of the session heartbeat (the heart icon).
+  // `inherit` means "no opinion" - the global switch decides. This is the
+  // session heartbeat, not the transport level keepaliveInterval above.
+  keepaliveMode: {
+    type: 'select',
+    name: 'keepaliveMode',
+    label: () => e('keepaliveMode'),
+    // a getter, not a plain value: the labels are translated at render time
+    // so they follow a language change and never show a bare key
+    get options () {
+      return [
+        { label: e('keepaliveModeInherit'), value: keepaliveModeValues.inherit },
+        { label: e('keepaliveModeOn'), value: keepaliveModeValues.on },
+        { label: e('keepaliveModeOff'), value: keepaliveModeValues.off }
+      ]
+    }
+  },
+
   terminalBackground: {
     type: 'terminalBackground',
     name: 'terminalBackground',
@@ -296,6 +315,7 @@ export const terminalSettings = [
   commonFields.fontFamily,
   commonFields.fontSize,
   commonFields.keepaliveInterval,
+  commonFields.keepaliveMode,
   commonFields.terminalBackground
 ]
 

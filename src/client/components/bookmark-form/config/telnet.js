@@ -7,6 +7,7 @@ import {
   getTerminalBackgroundDefaults,
   getAuthTypeDefault
 } from '../common/init-values.js'
+import { defaultKeepaliveMode } from '../../../common/keepalive-default.js'
 import { telnetAuthFields, terminalSettings, lineEndingFields, commonFields, quickCommandsTab, triggersTab } from './common-fields.js'
 
 const e = window.translate
@@ -24,6 +25,9 @@ const telnetConfig = {
       term: defaultSettings.terminalType,
       txLineEnding: '\r',
       rxLineEnding: 'none',
+      // fork: telnet sessions carry the heartbeat icon too, so they need the
+      // same per bookmark override as ssh and local
+      keepaliveMode: defaultKeepaliveMode(),
       ...getSshDefaults(),
       ...getTerminalBackgroundDefaults(defaultSettings),
       ...getAuthTypeDefault(props)
