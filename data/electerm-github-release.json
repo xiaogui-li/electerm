@@ -1,17 +1,17 @@
 {
   "release": {
-    "body": "### 本版本同步上游主库 5.12.7\n\n- 版本号采用四段式 `5.12.7.1`：前三段 `5.12.7` 对应上游主库版本，第 4 段用于区分本仓库自身的打包批次，**不代表新增主库功能**。\n- 本次以 rebase 方式同步上游 5.12.7（上游 master tip `cbcee277`），本仓库 33 笔定制提交全部完整重放，逐笔比对补丁指纹确认功能零丢失。\n\n---\n\n### 同步带来的上游更新（摘要）\n\n- 新增：渲染进程启动期间复用公共 WebSocket 握手（#4777）\n- 新增：内置 widget 的控件文案与名称本地化（#4778）\n- 新增：已停止的终端可用 Enter 键重新加载（#4773）\n- 新增：外部 RDP 会话的标签页不再被自动关闭（#4768）\n- 新增：RDP 书签可用本机 Windows 客户端打开（#4420）\n- 改进：ZMODEM 传输的磁盘背压传播、传输分帧与重复下载的扩展名保留（#4770 ~ #4772）\n- 安全：主窗口锁定在应用自身 origin，新增导航守卫与 IPC 来源校验（#4762 / #4763）\n- 修复：右键菜单被 electerm 拦截时，不再同时把该次右键传递给终端内程序\n- 修复：Electron 43 将文件对话框默认目录改为 Downloads 后的行为差异\n\n---\n\n### 本仓库的定制（fork-specific）\n\n以下为本仓库相对上游主库的自有改动，不属于上游功能更新：\n\n- 更新检查源指向本仓库：Gitee raw（主）+ GitHub Pages（备）；安装包托管在本仓库的 GitHub Releases\n- Windows 安装包统一为 `win-x64-installer.exe`（nsis）\n- 新增 Alt+1 ~ Alt+9 快速切换第 N 个标签页（Xshell 风格）\n- 记住窗口的最大化状态：上次关闭时是最大化，下次打开仍是最大化（首次无记录时保持默认非最大化）\n- 记住会话心跳（工具栏心形图标）默认开启，支持书签级覆盖\n- 修复 app 内更新下载到错误版本的问题（下载源改用本仓库的 release JSON）\n- 打包产物补齐 node-pty 的 `conpty.dll` / `OpenConsole.exe`，Windows 本地终端可正常连接\n- 修复 MCP Server 的 apiKey 每次重启都变的问题（apiKey 留空即沿用已保存值）\n- 修复浅色主题下设置项说明显示为裸 key 且看不清\n\n---\n\nDownload 下载: [https://github.com/xiaogui-li/electerm/releases/tag/v5.12.7.1](https://github.com/xiaogui-li/electerm/releases/tag/v5.12.7.1)\n",
-    "published_at": "2026-11-23T02:14:41Z",
+    "body": "### 本版本为 fork 的修复批次（上游主库版本仍为 5.12.7）\n\n- 版本号采用四段式 `5.12.7.5`：前三段 `5.12.7` 对应上游主库版本，第 4 段用于区分本仓库自身的打包批次，**不代表新增主库功能**。\n- 本次共 7 笔功能 / 修复提交，全部为本仓库相对上游主库的自有改动。\n\n---\n\n### 修复：会话心跳（keepalive）在终端留下多余内容\n\n这是本版的核心修复。原表现为：开启会话心跳后终端每隔几秒出现多余内容 —— 有时两个提示符挤在同一行，有时多出一个空行。\n\n根因是两层叠加：\n\n- **服务端**：心跳写入 PTY 的字节序列是 `'\\n\\r\\x1b[K'`。`\\r` 在 ICRNL 下是第二个行终止符，一次心跳会让 bash 接受两行空行、**重画两次提示符**；`\\x1b[K` 则滞留在 tty 输入缓冲（规范模式下只有换行才结束一行），之后被当成**下一条命令行**的一部分交给 readline，触发未绑定按键响铃。\n- **客户端**：心跳抑制窗口在遇到 shell integration 报告时，会把报告**之后**的提示符正文一并写入屏幕，于是重画的提示符贴到了当前行尾。\n\n修法：\n\n- 心跳字节改为单个 `'\\n'` —— 实测可正常重置 bash 的 TMOUT 闹钟，且只触发一次提示符重画、无残留字节、不污染下一条命令行。\n- 心跳抑制窗口改为**完全静默模式**：窗口内的内容一律丢弃，窗口在提示符正文到达时立即关闭（正文未到则等输出安静 150 ms），保证用户紧接着敲的命令不会被吞掉。\n- 同时修正了抑制窗口对转义序列的判定：CSI 序列按 ECMA-48 以最终字节 `0x40`–`0x7E` 结束，此前只认 BEL / ST 会把完整的 `ESC [ K` 误判为残缺序列并重复写入。\n\n### 修复：shell 集成改为连接即注入\n\n此前 shell 集成依赖会话心跳唤醒才会注入，远端会话常常拿不到提示符，导致 SFTP 跟随路径失效。现改为连接后立即注入，并行等待探测与提示符：\n\n- 探测与提示符等待改为并行，探测**只在超时才重试**。\n- 首批输出的判定独立成 `waitForInitialOutput`，并区分本地 / 远端：远端允许使用\"开始前已有的输出\"（banner 与提示符常在同一块数据里到达），本地 conpty 的初始化序列不能算提示符（否则会破坏 #4737 的行为）。\n- 实测注入耗时恒定 1.65 秒。\n\n### 新增：SFTP 跟随路径支持 OSC 1337\n\n- 除标准 OSC 633（VS Code）外，兼容 OSC 1337（iTerm2 私有协议）的 `CurrentDir` 字段，嵌套 shell 下不再失效。\n- 图标改为三态（未启用 / 待生效 / 已生效），打开后 5 秒内检查目录上报，未生效时给出明确提示，不再\"点了没反应\"。\n\n### 修复：SFTP 跟随路径在注入后丢失目录上报\n\n- 注入完成后目录上报不再丢失，新标签页无需手动点回形针才生效。\n\n### 修复：消息提示倒计时被新消息重置\n\n- 同一条消息的重复提示不再堆叠，倒计时也不会被新消息打断而关不掉。\n\n---\n\n### 本仓库的定制（fork-specific）\n\n以下为本仓库相对上游主库的自有改动，不属于上游功能更新：\n\n- 更新检查源指向本仓库：Gitee raw（主）+ GitHub Pages（备）；安装包托管在本仓库的 GitHub Releases\n- Windows 安装包统一为 `win-x64-installer.exe`（nsis）\n- 新增 Alt+1 ~ Alt+9 快速切换第 N 个标签页（Xshell 风格）\n- 记住窗口的最大化状态：上次关闭时是最大化，下次打开仍是最大化（首次无记录时保持默认非最大化）\n- 记住会话心跳（工具栏心形图标）默认开启，支持书签级覆盖\n- 修复 app 内更新下载到错误版本的问题（下载源改用本仓库的 release JSON）\n- 打包产物补齐 node-pty 的 `conpty.dll` / `OpenConsole.exe`，Windows 本地终端可正常连接\n- 修复 MCP Server 的 apiKey 每次重启都变的问题（apiKey 留空即沿用已保存值）\n- 修复浅色主题下设置项说明显示为裸 key 且看不清\n\n---\n\nDownload 下载: [https://github.com/xiaogui-li/electerm/releases/tag/v5.12.7.5](https://github.com/xiaogui-li/electerm/releases/tag/v5.12.7.5)\n",
+    "published_at": "2026-11-23T09:40:34Z",
     "assets": [
       {
-        "name": "electerm-5.12.7.1-win-x64-installer.exe",
-        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.12.7.1/electerm-5.12.7.1-win-x64-installer.exe",
-        "size": 120191948
+        "name": "electerm-5.12.7.5-win-x64-installer.exe",
+        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.12.7.5/electerm-5.12.7.5-win-x64-installer.exe",
+        "size": 120036015
       },
       {
-        "name": "electerm-5.12.7.1-win-x64-installer.exe.blockmap",
-        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.12.7.1/electerm-5.12.7.1-win-x64-installer.exe.blockmap",
-        "size": 126110
+        "name": "electerm-5.12.7.5-win-x64-installer.exe.blockmap",
+        "browser_download_url": "https://github.com/xiaogui-li/electerm/releases/download/v5.12.7.5/electerm-5.12.7.5-win-x64-installer.exe.blockmap",
+        "size": 126248
       }
     ]
   }
