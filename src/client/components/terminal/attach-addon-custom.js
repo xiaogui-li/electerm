@@ -16,6 +16,18 @@ const CURSOR_ESC_FINALS = new Set(['7', '8', 'D', 'E', 'M'])
 // growing the buffer without limit.
 const MAX_SUPPRESSED_CHARS = 200000
 
+// How long a silent suppression window waits for the output to go quiet
+// before it ends.
+//
+// The heartbeat redraw reaches the client as several writes: the echoed
+// newline, the shell integration report and the prompt text. They can land
+// in different chunks, so a silent window can not close on the report
+// alone - the prompt text would then arrive with the window already closed
+// and show up on the screen. Closing the window after a short quiet period
+// keeps the heartbeat invisible, and still closes fast enough that a
+// keystroke typed right after it is not swallowed.
+const SUPPRESS_QUIET_MS = 150
+
 function ansiSequenceEnd (str, start) {
   const type = str[start + 1]
   if (!type) {
@@ -154,6 +166,11 @@ export default class AttachAddonCustom {
     // Whether the report that ends a suppression window is written with a
     // leading newline; see startOutputSuppression.
     this._suppressLeadingNewline = true
+    // Whether the window hides everything it receives instead of writing
+    // the report and the prompt that follows it; see startOutputSuppression.
+    this._suppressSilent = false
+    // Timer that ends a silent window once the output goes quiet.
+    this._suppressQuietTimer = null
     this.suppressTimeout = null
     this.onSuppressionEndCallback = null
     this.hasReceivedInitialData = false
@@ -298,11 +315,37 @@ export default class AttachAddonCustom {
     })
   }
 
-  startOutputSuppression = (timeout = 3000, onEnd = null, discardOnTimeout = false, leadingNewline = true) => {
+  /**
+   * Hide the terminal output for a while.
+   *
+   * Two kinds of window exist:
+   *
+   *  - the injection window (shell integration): the echoed command is
+   *    swallowed, so the report and the prompt that follows it are written
+   *    back, with a leading newline so the fresh prompt starts on a line of
+   *    its own.
+   *  - the heartbeat window (session keepalive): the shell redraws its
+   *    prompt after the heartbeat woke it up, and that redraw must not be
+   *    visible at all - it would put a second prompt on the screen every
+   *    few seconds. A silent window therefore writes nothing and ends once
+   *    the output goes quiet.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 17:12:41
+   * @param {number} timeout - hard limit of the window, in ms
+   * @param {Function} onEnd - called when the window ends
+   * @param {boolean} discardOnTimeout - drop the buffered output on timeout
+   * @param {object} options - window behaviour
+   * @param {boolean} options.leadingNewline - write a newline before the report
+   * @param {boolean} options.silent - hide everything the window receives
+   * @returns {void}
+   */
+  startOutputSuppression = (timeout = 3000, onEnd = null, discardOnTimeout = false, options = {}) => {
     if (this.disposed) {
       onEnd?.()
       return
     }
+    const { leadingNewline = true, silent = false } = options
     // A suppression may already be running (e.g. the 500ms keepalive one).
     // Starting another must end it first - otherwise its timer stays armed
     // and fires in the middle of the new window, ending it early and
@@ -314,6 +357,7 @@ export default class AttachAddonCustom {
         clearTimeout(this.suppressTimeout)
         this.suppressTimeout = null
       }
+      this._clearSuppressQuietTimer()
       this.outputSuppressed = false
       previous?.()
     }
@@ -335,6 +379,8 @@ export default class AttachAddonCustom {
     // a blank line on every idle tick - one every few seconds, for as long
     // as the session sits there.
     this._suppressLeadingNewline = leadingNewline
+    // A silent window writes nothing at all - see the note above.
+    this._suppressSilent = silent
     this.onSuppressionEndCallback = onEnd
     this.suppressTimeout = setTimeout(() => {
       if (!discardOnTimeout) {
@@ -344,11 +390,81 @@ export default class AttachAddonCustom {
     }, timeout)
   }
 
+  /**
+   * The plain text that follows the last shell integration sequence in a
+   * chunk, or null when the chunk holds no sequence at all.
+   *
+   * The heartbeat redraw is the echoed newline, the report and the prompt
+   * text. The prompt text is what tells the client the redraw is over: as
+   * soon as it has been seen the silent window can close right away,
+   * instead of waiting for a quiet period - otherwise a keystroke typed in
+   * that period would be swallowed together with the redraw.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 17:21:07
+   * @param {string} str - The chunk to inspect
+   * @returns {string|null} The text after the last sequence, or null
+   */
+  shellIntegrationTail = (str) => {
+    const reportIdx = this.indexOfShellIntegration(str)
+    if (reportIdx === -1) {
+      return null
+    }
+    const ESC = String.fromCharCode(27)
+    let end = -1
+    for (let i = reportIdx; i < str.length; i++) {
+      if (str[i] === '\x07') {
+        end = i + 1
+      } else if (str[i] === ESC && str[i + 1] === '\\') {
+        end = i + 2
+      }
+    }
+    if (end === -1) {
+      return null
+    }
+    return str.slice(end)
+  }
+
+  /**
+   * (Re)arm the timer that ends a silent window once the output goes quiet.
+   *
+   * The timer is only armed by data that actually arrived, so a window that
+   * never sees the redraw still ends on its own hard timeout.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 17:13:52
+   * @returns {void}
+   */
+  _armSuppressQuietTimer = () => {
+    this._clearSuppressQuietTimer()
+    this._suppressQuietTimer = setTimeout(() => {
+      this._suppressQuietTimer = null
+      if (this.outputSuppressed && this._suppressSilent) {
+        this.stopOutputSuppression(true)
+      }
+    }, SUPPRESS_QUIET_MS)
+  }
+
+  /**
+   * Drop the pending quiet timer, if any.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 17:14:26
+   * @returns {void}
+   */
+  _clearSuppressQuietTimer = () => {
+    if (this._suppressQuietTimer) {
+      clearTimeout(this._suppressQuietTimer)
+      this._suppressQuietTimer = null
+    }
+  }
+
   stopOutputSuppression = (discard = true) => {
     if (this.suppressTimeout) {
       clearTimeout(this.suppressTimeout)
       this.suppressTimeout = null
     }
+    this._clearSuppressQuietTimer()
     this.outputSuppressed = false
 
     const pending = this.suppressedData
@@ -356,6 +472,7 @@ export default class AttachAddonCustom {
     this.suppressedChars = 0
     // The next window decides for itself; see startOutputSuppression.
     this._suppressLeadingNewline = true
+    this._suppressSilent = false
     if (!discard && pending.length > 0 && this.term) {
       for (const data of pending) {
         this.writeToTerminalDirect(data)
@@ -579,6 +696,28 @@ export default class AttachAddonCustom {
     }
 
     if (this.outputSuppressed) {
+      if (this._suppressSilent) {
+        // A silent window (the session heartbeat) writes nothing at all.
+        //
+        // The heartbeat wakes the shell up, and the shell answers with a
+        // full prompt redraw: the echoed newline, the shell integration
+        // report and the prompt text. Writing any part of it shows a second
+        // prompt on the screen - that is the "keepalive adds a line every
+        // few seconds" artefact - so the whole redraw is dropped.
+        //
+        // The window ends as soon as the redraw is over. The prompt text
+        // that follows the report is the marker for that; when it has not
+        // arrived yet the window waits for the output to go quiet, because
+        // the report and the prompt text are separate writes and can land
+        // in different chunks.
+        const tail = this.shellIntegrationTail(str)
+        if (tail === null || tail.length === 0) {
+          this._armSuppressQuietTimer()
+          return
+        }
+        this.stopOutputSuppression(true)
+        return
+      }
       // A shell integration sequence can straddle two TCP chunks. The tail
       // of the previous chunk is prepended here so the sequence is seen
       // whole - otherwise the introducer is never found, the window stays
@@ -593,9 +732,7 @@ export default class AttachAddonCustom {
         // tail of the echoed injection command and the first OSC 633 output
         // into one chunk, so write only from the first OSC sequence on —
         // everything before it is echo and stays hidden. A leading newline
-        // keeps the fresh prompt off the injection-time prompt line - but
-        // only the injection window wants that: the keepalive window would
-        // leave a blank line behind on every idle tick.
+        // keeps the fresh prompt off the injection-time prompt line.
         const leading = this._suppressLeadingNewline ? '\r\n' : ''
         this.stopOutputSuppression(true)
         this._enqueueWrite(leading + combined.slice(oscIdx))
@@ -869,12 +1006,12 @@ export default class AttachAddonCustom {
       // accepts the side-effect of an occasional echoed newline / re-prompt.
       // Start output suppression to hide the echoed prompt.
       //
-      // No leading newline for this window: the heartbeat draws nothing, and
-      // a newline in front of the shell integration report would leave a
-      // blank line on the screen every few seconds.
+      // The window is a silent one: the heartbeat only makes the shell
+      // redraw its prompt, and that redraw must not reach the screen at all
+      // - writing it leaves a second prompt behind on every idle tick.
       const sock = this._socket
       if (sock && sock.readyState === 1 /* OPEN */) {
-        this.startOutputSuppression(500, null, true, false)
+        this.startOutputSuppression(500, null, true, { silent: true })
         sock.send(JSON.stringify({ action: 'keepalive' }))
       }
     }
