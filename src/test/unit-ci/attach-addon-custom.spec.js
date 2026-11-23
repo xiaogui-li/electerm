@@ -127,12 +127,13 @@ describe('output suppression', () => {
     assert.equal(called, false)
   })
 
-  // The keepalive heartbeat writes '\n\r\x1b[K' into the pty every few
-  // seconds and the shell answers with a fresh prompt that carries its
-  // shell integration report. The window that hides the heartbeat must not
-  // put the report on a line of its own: the heartbeat drew nothing, so the
-  // newline would show up as a blank line on every idle tick.
-  test('the keepalive window leaves no blank line behind', async () => {
+  // The keepalive heartbeat writes '\n' into the pty every few seconds and
+  // the shell answers with a fresh prompt that carries its shell integration
+  // report. The window that hides the heartbeat must swallow the whole
+  // redraw - the echoed newline, the report and the prompt text. Writing
+  // any part of it puts a second prompt on the screen: that is the
+  // "keepalive adds a line every few seconds" artefact.
+  test('the keepalive window swallows the whole prompt redraw', async () => {
     const { addon, written } = await makeAddon()
     const esc = String.fromCharCode(27)
     const bel = String.fromCharCode(7)
@@ -143,14 +144,58 @@ describe('output suppression', () => {
     addon._keepaliveInterval = 3000
     addon._checkKeepalive()
 
-    addon.writeToTerminal('\n\r' + esc + '[K')
-    await new Promise(resolve => setTimeout(resolve, 10))
-    addon.writeToTerminal('[root@host:~]# ' + esc + ']633;P;Cwd=/root' + bel)
+    // exactly what bash answers with, captured from a real bash in a real
+    // pty: the echoed newline, the report and the prompt text
+    addon.writeToTerminal('\r\n' + esc + ']633;P;Cwd=/root' + bel + esc + ']633;A' + bel + '[root@host:~]# ')
     await new Promise(resolve => setTimeout(resolve, 50))
 
-    const screen = written.join('')
-    assert.ok(screen.includes(esc + ']633;'), 'the directory report still reaches the terminal')
-    assert.ok(!screen.includes('\r\n'), 'but no blank line is left on the screen')
+    assert.equal(written.join(''), '', 'nothing of the redraw reaches the terminal')
+    assert.equal(addon.outputSuppressed, false, 'the window closes once the redraw is over')
+  })
+
+  // The report and the prompt text are two separate writes from the shell,
+  // so they can land in two chunks. The window must stay open until the
+  // prompt text has been swallowed too.
+  test('the keepalive window waits for the prompt text when the report arrives alone', async () => {
+    const { addon, written } = await makeAddon()
+    const esc = String.fromCharCode(27)
+    const bel = String.fromCharCode(7)
+    addon._socket = { readyState: 1, send: () => {} }
+    addon._lineHasUnsubmittedInput = () => false
+    addon._lastDataTime = Date.now() - 10000
+    addon._lastInputTime = Date.now() - 10000
+    addon._keepaliveInterval = 3000
+    addon._checkKeepalive()
+
+    addon.writeToTerminal('\r\n' + esc + ']633;P;Cwd=/root' + bel + esc + ']633;A' + bel)
+    await new Promise(resolve => setTimeout(resolve, 10))
+    assert.equal(addon.outputSuppressed, true, 'the prompt text may still be on its way')
+
+    addon.writeToTerminal('[root@host:~]# ')
+    await new Promise(resolve => setTimeout(resolve, 300))
+
+    assert.equal(written.join(''), '', 'the prompt text is swallowed as well')
+    assert.equal(addon.outputSuppressed, false, 'and the window ends afterwards')
+  })
+
+  // The window must not swallow what comes after it - the command the user
+  // typed right after the heartbeat has to reach the screen.
+  test('output that arrives after the heartbeat window is written through', async () => {
+    const { addon, written } = await makeAddon()
+    const esc = String.fromCharCode(27)
+    const bel = String.fromCharCode(7)
+    addon._socket = { readyState: 1, send: () => {} }
+    addon._lineHasUnsubmittedInput = () => false
+    addon._lastDataTime = Date.now() - 10000
+    addon._lastInputTime = Date.now() - 10000
+    addon._keepaliveInterval = 3000
+    addon._checkKeepalive()
+
+    addon.writeToTerminal('\r\n' + esc + ']633;P;Cwd=/root' + bel + esc + ']633;A' + bel + '[root@host:~]# ')
+    addon.writeToTerminal('ls\r\nfile1\r\n')
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    assert.ok(written.join('').includes('file1'), 'the command output reaches the terminal')
   })
 
   // The injection window is the opposite case: the echoed command is
@@ -269,6 +314,21 @@ describe('session keepalive', () => {
       goIdle(addon)
       addon._checkKeepalive()
       assert.deepEqual(sent, [JSON.stringify({ action: 'keepalive' })])
+    } finally {
+      addon.dispose()
+    }
+  })
+
+  // The heartbeat window has to be the silent kind: the shell redraws its
+  // prompt after the heartbeat woke it up, and that redraw must not reach
+  // the screen at all.
+  test('an idle session opens a silent output window', async () => {
+    const { addon } = await makeKeepaliveAddon()
+    try {
+      goIdle(addon)
+      addon._checkKeepalive()
+      assert.equal(addon.outputSuppressed, true)
+      assert.equal(addon._suppressSilent, true)
     } finally {
       addon.dispose()
     }
