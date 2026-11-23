@@ -10,6 +10,12 @@ import {
  * Reacting to config changes that cannot be handled by a re-render: they need
  * the live xterm instance (font/renderer) or the shell integration sequence.
  */
+
+// The shell integration is injected right after the toggle is switched on and
+// the directory only arrives with the next prompt, so the check waits a moment
+// before it tells the user that nothing came in.
+const sftpFollowCheckDelayMs = 5000
+
 export const configMixin = {
   getValue (props, type, name) {
     return type === 'glob'
@@ -97,6 +103,44 @@ export const configMixin = {
     ) {
       return this.warnSftpFollowUnsupported()
     }
+    // The follow feature only works while the shell reports its working
+    // directory. When the toggle is switched on and nothing arrives, say
+    // so - otherwise the file manager just stays in the home directory with
+    // no hint at all.
+    if (!prevSftpFollow && currSftpFollow) {
+      this.scheduleSftpFollowCheck()
+    }
+  },
+
+  /**
+   * Warn when the follow feature is on but the shell reports no directory.
+   *
+   * The shell integration is injected right after the toggle is switched on
+   * and the directory arrives one prompt later, so the check waits before it
+   * calls the feature broken.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 11:29:40
+   */
+  scheduleSftpFollowCheck () {
+    clearTimeout(this.timers.sftpFollowCheck)
+    this.timers.sftpFollowCheck = setTimeout(() => {
+      this.timers.sftpFollowCheck = null
+      if (this.startupQueue?.isClosed()) {
+        return
+      }
+      // A reported directory is what the feature needs. The shell
+      // integration flag alone is not enough: OSC 1337 reports a directory
+      // without ever setting that flag.
+      if (this.cmdAddon?.getCwd() || this.cmdAddon?.hasShellIntegration()) {
+        return
+      }
+      message.warning(
+        <span>
+          {window.translate('sftpFollowSshNotWorking')}. See: <ExternalLink to='https://github.com/electerm/electerm/wiki/Warning-about-sftp-follow-ssh-path-function'>wiki</ExternalLink>
+        </span>
+        , 8)
+    }, sftpFollowCheckDelayMs)
   },
 
   warnSftpFollowUnsupported () {

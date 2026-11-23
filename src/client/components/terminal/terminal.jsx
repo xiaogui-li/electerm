@@ -289,6 +289,8 @@ class Term extends Component {
     this.timers.focusRefreshRaf = null
     clearTimeout(this.longPressTimer)
     this.longPressTimer = null
+    clearTimeout(this.timers.sftpFollowCheck)
+    this.timers.sftpFollowCheck = null
     this.touchStartPos = null
     this.stopAutoScroll()
     window.cancelAnimationFrame(this.dragFrame)

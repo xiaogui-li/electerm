@@ -24,6 +24,7 @@ import {
 import { SplitViewIcon } from '../icons/split-view'
 import { HeartbeatIcon } from '../icons/heartbeat'
 import { rightClickBehaviors } from '../../common/right-click-behavior'
+import { sftpFollowStates } from '../../common/sftp-follow-state.js'
 import SerialControl from './serial-control'
 import './session-control.styl'
 
@@ -38,7 +39,7 @@ export default function SessionControl (props) {
     isSshDisabled,
     isNotTerminalType,
     canSplitView,
-    sftpPathFollowSsh,
+    sftpFollowState,
     keepaliveEnabled,
     broadcastInput,
     wrapDisabled,
@@ -118,13 +119,20 @@ export default function SessionControl (props) {
       return null
     }
     const { enableSsh } = tab
-    const checkTxt = e('sftpPathFollowSsh')
+    // The toggle can be on while the shell never reports a directory - the
+    // file manager then stays in the home directory. The icon says so
+    // instead of looking exactly like the working state.
+    const followState = sftpFollowState || sftpFollowStates.off
+    const checkTxt = followState === sftpFollowStates.pending
+      ? e('sftpFollowSshPending')
+      : e('sftpPathFollowSsh')
     const checkProps = {
       onClick: toggleCheckSftpPathFollowSsh,
       className: classnames(
         'sftp-follow-ssh-icon sess-icon pointer',
         {
-          active: sftpPathFollowSsh
+          active: followState === sftpFollowStates.on,
+          pending: followState === sftpFollowStates.pending
         }
       )
     }

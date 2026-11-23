@@ -26,6 +26,19 @@ import { getPowerShellIntegrationScript } from '../../common/powershell-integrat
 /**
  * Get inline shell integration command for bash (one-liner format)
  * Properly formatted for semicolon joining
+ *
+ * The functions are exported with `export -f` so that a nested shell
+ * inherits them. A server profile that exports PROMPT_COMMAND passes that
+ * variable down to every child shell, but shell functions are never
+ * inherited - the child would then run a PROMPT_COMMAND calling
+ * `__e_cmd` and `__iterm_current_dir` that it does not have: "command not
+ * found" before every prompt, and no OSC 633 at all, so the SFTP follow
+ * silently stops there. With the functions exported, the inherited
+ * PROMPT_COMMAND keeps working in the nested shell.
+ *
+ * @author xiaogui
+ * @since 2026-11-23 11:21:10
+ * @returns {string} The one-liner integration command
  */
 function getBashInlineIntegration () {
   // Each statement is complete and can be joined with semicolons
@@ -35,6 +48,8 @@ function getBashInlineIntegration () {
     '__e_esc() { local v="$1"; v="${v//\\\\/\\\\\\\\}"; v="${v//;/\\\\x3b}"; printf \'%s\' "$v"; }',
     '__e_pre() { local p; [[ "$BASH_COMMAND" == __e_* || "$BASH_COMMAND" == PROMPT_COMMAND=* ]] && return; [[ "$BASH_COMMAND" == "$PROMPT_COMMAND" ]] && return; if [[ -n "${PROMPT_COMMAND:-}" ]]; then local IFS=\';\'; for p in $PROMPT_COMMAND; do p="${p#"${p%%[! ]*}"}"; [[ "$BASH_COMMAND" == "$p" ]] && return; done; fi; [[ "${__e_in:-0}" == "0" ]] && { __e_in=1; printf \'\\e]633;E;%s\\a\\e]633;C\\a\' "$(__e_esc "$BASH_COMMAND")"; }; }',
     '__e_cmd() { local c="$?"; [[ "${__e_in:-0}" == "1" ]] && { printf \'\\e]633;D;%s\\a\' "$c"; __e_in=0; }; printf \'\\e]633;P;Cwd=%s\\a\\e]633;A\\a\' "$(__e_esc "$PWD")"; return "$c"; }',
+    // hand the functions down to nested shells - see the note above
+    'export -f __e_esc __e_pre __e_cmd',
     'trap \'__e_pre\' DEBUG',
     'PROMPT_COMMAND="__e_cmd${PROMPT_COMMAND:+; $PROMPT_COMMAND}"',
     'fi'

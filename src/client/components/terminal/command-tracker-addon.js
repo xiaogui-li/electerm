@@ -71,6 +71,13 @@ export class CommandTrackerAddon {
     this._onCwdChanged = callback
   }
 
+  /**
+   * Register the OSC handlers and start listening.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 11:17:27
+   * @param {object} terminal - the xterm instance
+   */
   activate (terminal) {
     this.terminal = terminal
 
@@ -81,6 +88,15 @@ export class CommandTrackerAddon {
         return this._handleOsc633(data)
       })
       this._disposables.push(oscHandler)
+      // OSC 1337 is iTerm2's own protocol. Its CurrentDir key carries the
+      // working directory, so a host that already reports it (a profile
+      // copied from iTerm2, or any tool following the iTerm2 convention)
+      // now drives the SFTP follow feature on its own - electerm does not
+      // have to inject anything for it.
+      const itermHandler = terminal.parser.registerOscHandler(1337, (data) => {
+        return this._handleOsc1337(data)
+      })
+      this._disposables.push(itermHandler)
     }
   }
 
@@ -157,6 +173,62 @@ export class CommandTrackerAddon {
   }
 
   /**
+   * Handle the iTerm2 OSC 1337 sequence.
+   *
+   * The payload holds several `key=value` pairs separated by `;`, e.g.
+   * `CurrentDir=/tmp;ShellIntegrationVersion=1`. Only CurrentDir matters here.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 11:18:03
+   * @param {string} data - The OSC data after "1337;"
+   * @returns {boolean} Whether the sequence was handled
+   */
+  _handleOsc1337 (data) {
+    if (!data) return false
+    const cwd = this._parseOsc1337CurrentDir(data)
+    if (!cwd) return false
+    this._applyCwd(cwd)
+    return true
+  }
+
+  /**
+   * Pull the CurrentDir value out of an OSC 1337 payload.
+   *
+   * iTerm2 sends the path raw: unlike the OSC 633 `Cwd=` value, which the
+   * shell side escapes (`\` -> `\\`, `;` -> `\x3b`), there is nothing to
+   * unescape here - a path that contains a backslash stays as it is.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 11:18:41
+   * @param {string} data - The OSC data after "1337;"
+   * @returns {string} The raw path, or '' when the key is absent
+   */
+  _parseOsc1337CurrentDir (data) {
+    const match = /CurrentDir=([^;]*)/.exec(String(data))
+    return match ? match[1] : ''
+  }
+
+  /**
+   * Record a new working directory and notify the listener.
+   *
+   * Shared by the OSC 633 `P;Cwd=` property and the OSC 1337 `CurrentDir`
+   * key: both are real path reports and only differ in how the value is
+   * escaped, so they end up in the same place.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 11:19:15
+   * @param {string} value - The unescaped path
+   */
+  _applyCwd (value) {
+    const oldCwd = this.cwd
+    this.cwd = value
+    // Call the callback if registered and CWD actually changed
+    if (this._onCwdChanged && oldCwd !== value) {
+      this._onCwdChanged(value)
+    }
+  }
+
+  /**
    * Handle OSC 633 ; P property sequences
    * @param {string} data - Property data like "Cwd=/path/to/dir"
    */
@@ -169,12 +241,7 @@ export class CommandTrackerAddon {
 
     switch (key) {
       case 'Cwd': {
-        const oldCwd = this.cwd
-        this.cwd = value
-        // Call the callback if registered and CWD actually changed
-        if (this._onCwdChanged && oldCwd !== value) {
-          this._onCwdChanged(value)
-        }
+        this._applyCwd(value)
         break
       }
       // Add more properties as needed
