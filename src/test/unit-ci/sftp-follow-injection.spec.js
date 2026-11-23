@@ -74,6 +74,28 @@ describe('a shell integration sequence split across two chunks', () => {
 
     assert.equal(addon.findIncompleteSequenceStart('plain output'), -1)
   })
+
+  // A CSI sequence is finished by its final byte (0x40-0x7e), not by a
+  // terminator. The keepalive heartbeat writes `ESC [ K` on every idle
+  // tick, and a sequence that was mistaken for an unfinished one was held
+  // back as a carry-over - which put a new prompt line on the screen every
+  // few seconds.
+  test('a complete CSI sequence leaves nothing to carry over', async () => {
+    const { default: AttachAddonCustom } = await loadAttachAddon()
+    const addon = new AttachAddonCustom({}, {})
+
+    assert.equal(addon.findIncompleteSequenceStart(ESC + '[K'), -1)
+    assert.equal(addon.findIncompleteSequenceStart(ESC + '[2J'), -1)
+    assert.equal(addon.findIncompleteSequenceStart(ESC + '[1;31m'), -1)
+  })
+
+  test('an unfinished CSI sequence is carried over', async () => {
+    const { default: AttachAddonCustom } = await loadAttachAddon()
+    const addon = new AttachAddonCustom({}, {})
+    const str = 'prompt$' + ESC + '[2'
+
+    assert.equal(addon.findIncompleteSequenceStart(str), 7)
+  })
 })
 
 const createAddon = (overrides = {}) => ({

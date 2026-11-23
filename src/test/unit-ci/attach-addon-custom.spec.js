@@ -126,6 +126,48 @@ describe('output suppression', () => {
     })
     assert.equal(called, false)
   })
+
+  // The keepalive heartbeat writes '\n\r\x1b[K' into the pty every few
+  // seconds and the shell answers with a fresh prompt that carries its
+  // shell integration report. The window that hides the heartbeat must not
+  // put the report on a line of its own: the heartbeat drew nothing, so the
+  // newline would show up as a blank line on every idle tick.
+  test('the keepalive window leaves no blank line behind', async () => {
+    const { addon, written } = await makeAddon()
+    const esc = String.fromCharCode(27)
+    const bel = String.fromCharCode(7)
+    addon._socket = { readyState: 1, send: () => {} }
+    addon._lineHasUnsubmittedInput = () => false
+    addon._lastDataTime = Date.now() - 10000
+    addon._lastInputTime = Date.now() - 10000
+    addon._keepaliveInterval = 3000
+    addon._checkKeepalive()
+
+    addon.writeToTerminal('\n\r' + esc + '[K')
+    await new Promise(resolve => setTimeout(resolve, 10))
+    addon.writeToTerminal('[root@host:~]# ' + esc + ']633;P;Cwd=/root' + bel)
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    const screen = written.join('')
+    assert.ok(screen.includes(esc + ']633;'), 'the directory report still reaches the terminal')
+    assert.ok(!screen.includes('\r\n'), 'but no blank line is left on the screen')
+  })
+
+  // The injection window is the opposite case: the echoed command is
+  // swallowed, so the screen is left sitting on the injection line and the
+  // report has to start on a line of its own.
+  test('the injection window still starts the report on its own line', async () => {
+    const { addon, written } = await makeAddon()
+    const esc = String.fromCharCode(27)
+    const bel = String.fromCharCode(7)
+    addon.startOutputSuppression(3000, () => {}, true)
+    addon.writeToTerminal('echo $SHELL\r')
+    await new Promise(resolve => setTimeout(resolve, 10))
+    addon.writeToTerminal(esc + ']633;P;Cwd=/root' + bel)
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    assert.ok(written.join('').startsWith('\r\n'), 'the report starts on a line of its own')
+  })
 })
 
 describe('waitForOutputIdle', () => {

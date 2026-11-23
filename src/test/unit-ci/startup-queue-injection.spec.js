@@ -262,7 +262,7 @@ describe('a shell whose first screen is already complete', () => {
 // printed before any prompt exists, and counting them would type the script
 // into a booting console (#4737).
 describe('which output counts as the shell speaking', () => {
-  test("a local shell does not count the output from before the wait", async () => {
+  test('a local shell does not count the output from before the wait', async () => {
     const { StartupQueue } = await loadQueue()
     const addon = makeAddon()
     // conpty's init sequences, printed before any prompt exists.
