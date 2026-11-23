@@ -14,7 +14,18 @@ import {
 // The shell integration is injected right after the toggle is switched on and
 // the directory only arrives with the next prompt, so the check waits a moment
 // before it tells the user that nothing came in.
-const sftpFollowCheckDelayMs = 5000
+//
+// The injection is not a single step: the remote shell probe alone takes up
+// to 3s, the wait for the first prompt up to 8s and the output suppression
+// window (which hides the directory report that follows the injection) up to
+// 12s. A 5s check therefore fired while the injection was still running and
+// blamed the feature for a report that had not had its chance yet.
+const sftpFollowCheckDelayMs = 12000
+
+// How often the check may be postponed while the injection is still in
+// flight. Two postponements put the last check 36s after the toggle was
+// switched on, which covers the worst case of the three steps above.
+const sftpFollowCheckMaxPostpones = 2
 
 export const configMixin = {
   getValue (props, type, name) {
@@ -108,6 +119,7 @@ export const configMixin = {
     // so - otherwise the file manager just stays in the home directory with
     // no hint at all.
     if (!prevSftpFollow && currSftpFollow) {
+      this.sftpFollowCheckPostpones = 0
       this.scheduleSftpFollowCheck()
     }
   },
@@ -117,7 +129,9 @@ export const configMixin = {
    *
    * The shell integration is injected right after the toggle is switched on
    * and the directory arrives one prompt later, so the check waits before it
-   * calls the feature broken.
+   * calls the feature broken. While the injection is still running the check
+   * postpones itself: the injection has several slow steps and none of them
+   * has produced a report yet.
    *
    * @author xiaogui
    * @since 2026-11-23 11:29:40
@@ -129,6 +143,18 @@ export const configMixin = {
       if (this.startupQueue?.isClosed()) {
         return
       }
+      // The injection is still in flight - the remote shell probe, the wait
+      // for the first prompt and the output suppression window all take
+      // longer than one check interval. Postpone instead of blaming the
+      // feature for a report that has not had its chance yet.
+      if (
+        this.startupQueue?.shellIntegrationPending &&
+        this.sftpFollowCheckPostpones < sftpFollowCheckMaxPostpones
+      ) {
+        this.sftpFollowCheckPostpones++
+        this.scheduleSftpFollowCheck()
+        return
+      }
       // A reported directory is what the feature needs. The shell
       // integration flag alone is not enough: OSC 1337 reports a directory
       // without ever setting that flag.
@@ -136,7 +162,7 @@ export const configMixin = {
         return
       }
       message.warning(
-        <span>
+        <span key='sftp-follow-not-working'>
           {window.translate('sftpFollowSshNotWorking')}. See: <ExternalLink to='https://github.com/electerm/electerm/wiki/Warning-about-sftp-follow-ssh-path-function'>wiki</ExternalLink>
         </span>
         , 8)
@@ -145,7 +171,7 @@ export const configMixin = {
 
   warnSftpFollowUnsupported () {
     message.warning(
-      <span>
+      <span key='sftp-follow-unsupported'>
         Fish shell/windows shell is not supported for SFTP follow SSH path feature. See: <ExternalLink to='https://github.com/electerm/electerm/wiki/Warning-about-sftp-follow-ssh-path-function'>wiki</ExternalLink>
       </span>
       , 7)

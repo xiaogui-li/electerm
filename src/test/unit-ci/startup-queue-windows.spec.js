@@ -210,9 +210,11 @@ describe('Windows startup directory', () => {
       cwd: 'D:\\work',
       args: ['-NoProfile', '-File', 'C:\\setup.ps1']
     })
-    assert.equal(sent.length, 2)
+    assert.equal(sent.length, 3)
     assert.match(sent[0], /ELECTERM_SHELL_INTEGRATION/)
-    assert.equal(sent[1], "Set-Location -LiteralPath 'D:\\work'\r")
+    // the fresh prompt that makes the shell report its working directory
+    assert.equal(sent[1], '\r')
+    assert.equal(sent[2], "Set-Location -LiteralPath 'D:\\work'\r")
   })
 
   // cmd cannot report a cwd from its prompt: injecting the PowerShell script

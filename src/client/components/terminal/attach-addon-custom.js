@@ -148,6 +148,9 @@ export default class AttachAddonCustom {
     this.outputSuppressed = false
     this.suppressedData = []
     this.suppressedChars = 0
+    // Tail of an escape sequence that was cut off by a chunk boundary
+    // while the output was suppressed; see findIncompleteSequenceStart.
+    this._suppressTail = ''
     this.suppressTimeout = null
     this.onSuppressionEndCallback = null
     this.hasReceivedInitialData = false
@@ -314,6 +317,9 @@ export default class AttachAddonCustom {
     this.outputSuppressed = true
     this.suppressedData = []
     this.suppressedChars = 0
+    // A new window starts with no carry-over: the previous window's tail
+    // belongs to a sequence that was already dropped.
+    this._suppressTail = ''
     this.onSuppressionEndCallback = onEnd
     this.suppressTimeout = setTimeout(() => {
       if (!discardOnTimeout) {
@@ -428,10 +434,57 @@ export default class AttachAddonCustom {
     }
   }
 
-  // Index of the first OSC 633 sequence in the chunk, or -1.
+  // Index of the first shell integration sequence in the chunk, or -1.
+  //
+  // OSC 633 is electerm's own protocol and OSC 1337 is iTerm2's - both
+  // carry the working directory, so both have to end the suppression
+  // window. Only OSC 633 used to be looked for, and a shell that only
+  // speaks 1337 kept its window open until the timeout, which threw the
+  // directory report away with it.
   indexOfShellIntegration = (str) => {
     const ESC = String.fromCharCode(27)
-    return str.indexOf(ESC + ']633;')
+    const osc633 = str.indexOf(ESC + ']633;')
+    const osc1337 = str.indexOf(ESC + ']1337;')
+    if (osc633 === -1) {
+      return osc1337
+    }
+    if (osc1337 === -1) {
+      return osc633
+    }
+    return Math.min(osc633, osc1337)
+  }
+
+  /**
+   * Where an unfinished escape sequence starts in a chunk, or -1.
+   *
+   * A shell integration sequence can be split across two TCP chunks: the
+   * first ends in the middle of `ESC ] 633 ; P ; Cwd=/...` and the second
+   * carries the rest. Searching each chunk on its own never finds the
+   * introducer, so the window stays open until the timeout and the
+   * directory the shell reported is dropped with the discarded buffer.
+   * The tail of the previous chunk is therefore kept and prepended to the
+   * next one, so the sequence is seen whole.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 12:36:20
+   * @param {string} str - The chunk to inspect
+   * @returns {number} The index of the incomplete sequence, or -1
+   */
+  findIncompleteSequenceStart = (str) => {
+    const ESC = String.fromCharCode(27)
+    const idx = str.lastIndexOf(ESC)
+    if (idx === -1) {
+      return -1
+    }
+    const rest = str.slice(idx)
+    // A terminated sequence needs no carry-over.
+    if (rest.includes('\x07')) {
+      return -1
+    }
+    if (rest.includes(ESC + '\\')) {
+      return -1
+    }
+    return idx
   }
 
   writeToTerminalDirect = (data) => {
@@ -484,7 +537,15 @@ export default class AttachAddonCustom {
     }
 
     if (this.outputSuppressed) {
-      const oscIdx = this.indexOfShellIntegration(str)
+      // A shell integration sequence can straddle two TCP chunks. The tail
+      // of the previous chunk is prepended here so the sequence is seen
+      // whole - otherwise the introducer is never found, the window stays
+      // open until the timeout and the directory report is dropped with
+      // the discarded buffer.
+      const pending = this._suppressTail || ''
+      this._suppressTail = ''
+      const combined = pending + str
+      const oscIdx = this.indexOfShellIntegration(combined)
       if (oscIdx !== -1) {
         // Shell integration is confirmed active. The pty often coalesces the
         // tail of the echoed injection command and the first OSC 633 output
@@ -492,8 +553,13 @@ export default class AttachAddonCustom {
         // everything before it is echo and stays hidden. A leading newline
         // keeps the fresh prompt off the injection-time prompt line.
         this.stopOutputSuppression(true)
-        this._enqueueWrite('\r\n' + str.slice(oscIdx))
+        this._enqueueWrite('\r\n' + combined.slice(oscIdx))
         return
+      }
+      // Keep an unfinished escape sequence for the next chunk.
+      const tailStart = this.findIncompleteSequenceStart(combined)
+      if (tailStart !== -1) {
+        this._suppressTail = combined.slice(tailStart)
       }
       // Bounded: a slow login banner or a chatty MOTD during the injection
       // window must not buffer without limit while output is hidden.

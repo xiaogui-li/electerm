@@ -109,6 +109,11 @@ class Term extends Component {
 
   timers = {}
 
+  // How often the "sftp follow did not report a directory" check was
+  // postponed because the shell integration injection was still running.
+  // See scheduleSftpFollowCheck in mixins/term-config.jsx.
+  sftpFollowCheckPostpones = 0
+
   // Config keys that cannot be applied by a re-render - they are pushed into
   // the live xterm options instead.
   terminalConfigProps = [
