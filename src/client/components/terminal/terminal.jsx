@@ -102,7 +102,32 @@ class Term extends Component {
     refs.add(this.id, this)
     this.currentInput = ''
     // Owns the shell integration injection + cd + runScripts sequence.
-    this.startupQueue = new StartupQueue(this, { detectRemoteShell })
+    this.startupQueue = new StartupQueue(this, {
+      detectRemoteShell,
+      onInjectionFailed: () => this.onShellIntegrationFailed()
+    })
+  }
+
+  /**
+   * The shell integration did not happen at all.
+   *
+   * The follow feature needs the shell to report its working directory, and
+   * that only works when the integration was injected. When it was not, the
+   * file manager would just sit in the home directory with no hint at all -
+   * so the check that says "the follow feature does not work" is scheduled
+   * as well.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 15:12:24
+   */
+  onShellIntegrationFailed = () => {
+    // The notice is about the follow feature, so it only makes sense when
+    // this session wants it.
+    if (!this.props.sftpPathFollowSsh) {
+      return
+    }
+    this.sftpFollowCheckPostpones = 0
+    this.scheduleSftpFollowCheck()
   }
 
   domRef = createRef()
