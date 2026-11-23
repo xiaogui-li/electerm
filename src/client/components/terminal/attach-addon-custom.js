@@ -151,6 +151,9 @@ export default class AttachAddonCustom {
     // Tail of an escape sequence that was cut off by a chunk boundary
     // while the output was suppressed; see findIncompleteSequenceStart.
     this._suppressTail = ''
+    // Whether the report that ends a suppression window is written with a
+    // leading newline; see startOutputSuppression.
+    this._suppressLeadingNewline = true
     this.suppressTimeout = null
     this.onSuppressionEndCallback = null
     this.hasReceivedInitialData = false
@@ -295,7 +298,7 @@ export default class AttachAddonCustom {
     })
   }
 
-  startOutputSuppression = (timeout = 3000, onEnd = null, discardOnTimeout = false) => {
+  startOutputSuppression = (timeout = 3000, onEnd = null, discardOnTimeout = false, leadingNewline = true) => {
     if (this.disposed) {
       onEnd?.()
       return
@@ -320,6 +323,18 @@ export default class AttachAddonCustom {
     // A new window starts with no carry-over: the previous window's tail
     // belongs to a sequence that was already dropped.
     this._suppressTail = ''
+    // Whether the report that ends this window is written with a leading
+    // newline.
+    //
+    // The injection window needs it: the echoed command is swallowed, so the
+    // screen is left sitting on the injection line and the fresh prompt has
+    // to start on a line of its own.
+    //
+    // The keepalive window must not have it: that window swallows a
+    // heartbeat which never drew anything, and the newline would show up as
+    // a blank line on every idle tick - one every few seconds, for as long
+    // as the session sits there.
+    this._suppressLeadingNewline = leadingNewline
     this.onSuppressionEndCallback = onEnd
     this.suppressTimeout = setTimeout(() => {
       if (!discardOnTimeout) {
@@ -339,6 +354,8 @@ export default class AttachAddonCustom {
     const pending = this.suppressedData
     this.suppressedData = []
     this.suppressedChars = 0
+    // The next window decides for itself; see startOutputSuppression.
+    this._suppressLeadingNewline = true
     if (!discard && pending.length > 0 && this.term) {
       for (const data of pending) {
         this.writeToTerminalDirect(data)
@@ -465,6 +482,17 @@ export default class AttachAddonCustom {
    * The tail of the previous chunk is therefore kept and prepended to the
    * next one, so the sequence is seen whole.
    *
+   * A sequence is finished when its terminator is there, and a terminator
+   * depends on the kind of sequence (ECMA-48):
+   *  - OSC (`ESC ]`) ends with BEL (`\x07`) or ST (`ESC \`)
+   *  - CSI (`ESC [`) ends with a final byte in the range 0x40-0x7e
+   *  - DCS/SOS/PM/APC (`ESC P/X/^/_`) end with ST
+   * Getting this wrong is not a cosmetic issue: a *complete* sequence that
+   * is mistaken for an unfinished one is held back as a carry-over and
+   * prepended to the next chunk, so it is written to the screen twice -
+   * and since the keepalive heartbeat writes `ESC [ K` on every idle
+   * tick, that produced a new prompt line every few seconds.
+   *
    * @author xiaogui
    * @since 2026-11-23 12:36:20
    * @param {string} str - The chunk to inspect
@@ -483,6 +511,20 @@ export default class AttachAddonCustom {
     }
     if (rest.includes(ESC + '\\')) {
       return -1
+    }
+    // CSI (`ESC [`) is finished by its final byte, which is in the range
+    // 0x40-0x7e (`@` to `~`). Parameter and intermediate bytes are below
+    // 0x40, so the first byte in that range closes the sequence.
+    // `ESC [ K` (erase in line) - what the keepalive heartbeat writes - is
+    // such a sequence and must not be carried over.
+    if (rest[1] === '[') {
+      for (let i = 2; i < rest.length; i++) {
+        const code = rest.charCodeAt(i)
+        if (code >= 0x40 && code <= 0x7e) {
+          return -1
+        }
+      }
+      return idx
     }
     return idx
   }
@@ -551,9 +593,12 @@ export default class AttachAddonCustom {
         // tail of the echoed injection command and the first OSC 633 output
         // into one chunk, so write only from the first OSC sequence on —
         // everything before it is echo and stays hidden. A leading newline
-        // keeps the fresh prompt off the injection-time prompt line.
+        // keeps the fresh prompt off the injection-time prompt line - but
+        // only the injection window wants that: the keepalive window would
+        // leave a blank line behind on every idle tick.
+        const leading = this._suppressLeadingNewline ? '\r\n' : ''
         this.stopOutputSuppression(true)
-        this._enqueueWrite('\r\n' + combined.slice(oscIdx))
+        this._enqueueWrite(leading + combined.slice(oscIdx))
         return
       }
       // Keep an unfinished escape sequence for the next chunk.
@@ -823,9 +868,13 @@ export default class AttachAddonCustom {
       // resets the TMOUT alarm. The user has explicitly enabled keepalive and
       // accepts the side-effect of an occasional echoed newline / re-prompt.
       // Start output suppression to hide the echoed prompt.
+      //
+      // No leading newline for this window: the heartbeat draws nothing, and
+      // a newline in front of the shell integration report would leave a
+      // blank line on the screen every few seconds.
       const sock = this._socket
       if (sock && sock.readyState === 1 /* OPEN */) {
-        this.startOutputSuppression(500, null, true)
+        this.startOutputSuppression(500, null, true, false)
         sock.send(JSON.stringify({ action: 'keepalive' }))
       }
     }
