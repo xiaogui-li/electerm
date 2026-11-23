@@ -140,9 +140,12 @@ describe('startup queue', () => {
     queue.runInitScript()
     await tick()
 
-    assert.equal(addon.sent.length, 2)
+    // Three things are typed: the integration script, the fresh prompt that
+    // makes the shell report its working directory, and then the script.
+    assert.equal(addon.sent.length, 3)
     assert.match(addon.sent[0], /ELECTERM_SHELL_INTEGRATION/)
-    assert.equal(addon.sent[1], 'ls\r')
+    assert.equal(addon.sent[1], '\r')
+    assert.equal(addon.sent[2], 'ls\r')
     assert.equal(queue.shellInjected, true)
 
     // a second request is a no-op

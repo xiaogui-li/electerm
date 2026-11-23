@@ -70,6 +70,8 @@ export class StartupQueue {
     this.running = false
     this.shellInjected = false
     this.shellType = null
+    // True while an injection is in flight; see injectShellIntegration.
+    this.shellIntegrationPending = false
     this.timers = new Set()
     // Timings of the "is the shell listening yet?" wait (see
     // waitForFirstPrompt). Instance fields so a test can shorten them.
@@ -500,6 +502,38 @@ export class StartupQueue {
       return
     }
 
+    // Mark the injection as running. The caller uses the flag to tell
+    // "the shell reported nothing yet" apart from "the injection has not
+    // had its chance yet" - the injection needs the remote shell probe, the
+    // wait for the first prompt and the output suppression window, all of
+    // which take longer than one check interval.
+    this.shellIntegrationPending = true
+    try {
+      const typedByUs = await this._doInjectShellIntegration(addon)
+      // The injection is done and the output suppression window is closed,
+      // so this is the first moment a prompt's OSC 633 ;P;Cwd= can reach
+      // the client. Ask for a fresh prompt to get that report - without it
+      // the directory the shell just reported stays hidden and the file
+      // manager only starts following after the user runs a command.
+      if (typedByUs) {
+        this.requestFreshPrompt(addon)
+      }
+    } finally {
+      this.shellIntegrationPending = false
+    }
+  }
+
+  /**
+   * The actual injection, see injectShellIntegration.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 12:42:30
+   * @param {object} addon - The attach addon of this session
+   * @returns {Promise<boolean>} Resolves to true when the script was typed
+   *   into the shell by the client, false when the server had injected it
+   *   already or nothing was injected at all
+   */
+  _doInjectShellIntegration = async (addon) => {
     let shellType
     if (this.isLocal()) {
       shellType = this.getLocalShellType()
@@ -517,12 +551,12 @@ export class StartupQueue {
     // `sh` in that case is exactly what typed the script into a switch - skip
     // instead, and let the session stay a plain terminal.
     if (!shellType) {
-      return
+      return false
     }
 
     // `cmd` is detected only to keep it out: it cannot run any script we have.
     if (!shellIntegrationTypes.has(shellType)) {
-      return
+      return false
     }
 
     this.shellType = shellType
@@ -537,7 +571,9 @@ export class StartupQueue {
     if (this.isSpawnInjectedShell(shellType)) {
       this.shellInjected = true
       await this.waitForFirstPrompt(this.addon)
-      return
+      // The server injected it at spawn time: the shell already reports its
+      // directory from every prompt, no extra one is needed.
+      return false
     }
 
     // sh/ash only reports cwd via PS1 (no command tracking), so it is only
@@ -549,7 +585,7 @@ export class StartupQueue {
       !sftpPathFollowSsh &&
       !config.restoreTerminalSessionOnReload
     ) {
-      return
+      return false
     }
 
     // The connection (or the whole terminal) can go away while
@@ -557,7 +593,7 @@ export class StartupQueue {
     // on a dead socket - that is what used to leave the queue, and every run
     // script behind it, waiting forever.
     if (this.isClosed() || this.addon !== addon || addon.disposed) {
-      return
+      return false
     }
 
     const integrationCmd = getShellIntegrationCommand(shellType)
@@ -566,6 +602,10 @@ export class StartupQueue {
       let done = false
       let gaveUp = false
       let pollTimer = null
+      // Whether the script really made it into the shell. The paths that
+      // give up before that point must not type anything at all - a shell
+      // that never settles must stay untouched.
+      let typed = false
       const finish = () => {
         if (done) {
           return
@@ -573,7 +613,9 @@ export class StartupQueue {
         done = true
         clearInterval(pollTimer)
         pollTimer = null
-        resolve()
+        // true: the script was typed into the shell, so the caller has to
+        // ask for a fresh prompt to get the directory report.
+        resolve(typed)
       }
       // Stop hiding output *without* showing what was hidden: everything
       // buffered in this window is the echo of the injection itself, which is
@@ -582,10 +624,8 @@ export class StartupQueue {
       //
       // Nothing reached the terminal, so the screen is left at whatever it
       // showed before the injection - which, on a shell that drew its first
-      // prompt inside the window, is nothing at all. One empty Enter asks the
-      // shell for a fresh prompt; it is skipped when the line may hold
-      // unsubmitted input (a password prompt, hidden input, a full-screen
-      // program), where a stray Enter is worse than a bare line.
+      // prompt inside the window, is nothing at all. The fresh prompt that
+      // reports the working directory is asked for by the caller.
       const giveUp = () => {
         if (done) {
           return
@@ -593,14 +633,6 @@ export class StartupQueue {
         gaveUp = true
         if (addon.outputSuppressed) {
           addon.stopOutputSuppression(true)
-          if (
-            this.addon === addon &&
-            !addon.disposed &&
-            typeof addon._lineHasUnsubmittedInput === 'function' &&
-            !addon._lineHasUnsubmittedInput()
-          ) {
-            addon._sendData('\r')
-          }
         }
         finish()
       }
@@ -677,6 +709,10 @@ export class StartupQueue {
           // Start suppressing output before sending the integration command.
           // This hides the command and its output until OSC 633 is detected.
           // The addon's own timer is only a backstop: the poll above decides.
+          // Marked before the suppression window opens: the window may end
+          // synchronously, and the caller has to know that the script went
+          // into the shell even then.
+          typed = true
           addon.startOutputSuppression(injectionMaxWaitMs + 2000, () => {
             if (!gaveUp && !addon.disposed) {
               this.shellInjected = true
@@ -687,6 +723,46 @@ export class StartupQueue {
         })
       })
     })
+  }
+
+  /**
+   * Ask the shell for one fresh prompt.
+   *
+   * The working directory is reported from the prompt hook, so the report
+   * that follows the injection is swallowed by the output suppression
+   * window that was just closed - the window hides everything until the
+   * first OSC sequence shows up, and that first sequence is the directory
+   * report itself. Without a second prompt the client never learns the
+   * directory, and the file manager stays in the home directory until the
+   * user happens to run a command.
+   *
+   * One empty Enter gives the shell a prompt to draw, and that prompt's
+   * report reaches the client. It is skipped when the line may hold
+   * unsubmitted input (a password prompt, hidden input, a full-screen
+   * program), where a stray Enter is worse than a bare line.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 12:39:50
+   * @param {object} addon - The attach addon of this session
+   */
+  requestFreshPrompt = (addon) => {
+    if (!addon || addon.disposed || this.isClosed()) {
+      return
+    }
+    if (this.addon !== addon) {
+      return
+    }
+    // The window has to be closed, otherwise the report is swallowed again.
+    if (addon.outputSuppressed) {
+      return
+    }
+    if (
+      typeof addon._lineHasUnsubmittedInput === 'function' &&
+      addon._lineHasUnsubmittedInput()
+    ) {
+      return
+    }
+    addon._sendData('\r')
   }
 }
 
