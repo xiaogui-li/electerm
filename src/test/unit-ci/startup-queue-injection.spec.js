@@ -16,17 +16,25 @@ const loadQueue = () => import('../../client/components/terminal/startup-queue.j
 // idleness clock (`getLastOutputTime`, updated even while output is hidden),
 // the suppression switch, and the data channel. `feed()` simulates the shell
 // writing something.
+let addonSeq = 0
 const makeAddon = () => {
+  addonSeq++
   const addon = {
+    id: addonSeq,
     disposed: false,
     outputSuppressed: false,
     lastOutput: Date.now(),
+    // The real addon raises this on the first chunk it receives. The queue
+    // reads it to tell "the shell already said something" from "the shell
+    // has not said anything yet".
+    hasReceivedInitialData: false,
     sent: [],
     stoppedWith: [],
     onEnd: null,
     getLastOutputTime: () => addon.lastOutput,
     feed: () => {
       addon.lastOutput = Date.now()
+      addon.hasReceivedInitialData = true
     },
     _sendData: data => addon.sent.push(data),
     onInitialData: cb => setTimeout(cb, 0),
@@ -51,7 +59,10 @@ const makeAddon = () => {
   return addon
 }
 
-const makeQueue = async (addon, { setup, remote = false, localStart = '' } = {}) => {
+const makeQueue = async (
+  addon,
+  { setup, remote = false, localStart = '', detectRemoteShell = () => Promise.resolve('bash'), onInjectionFailed } = {}
+) => {
   const { StartupQueue } = await loadQueue()
   const host = {
     attachAddon: addon,
@@ -67,7 +78,8 @@ const makeQueue = async (addon, { setup, remote = false, localStart = '' } = {})
     isSsh: () => remote
   }
   const queue = new StartupQueue(host, {
-    detectRemoteShell: () => Promise.resolve('bash')
+    detectRemoteShell,
+    onInjectionFailed
   })
   if (setup) {
     setup(queue)
@@ -253,5 +265,212 @@ describe('remote shell integration window', () => {
     assert.deepEqual(addon.stoppedWith, [true], 'buffered echo is discarded, not flushed')
     assert.equal(queue.shellInjected, false, 'no confirmation, so not marked as injected')
     queue.dispose()
+  })
+})
+
+// The shell often draws its prompt in the very first chunk and then stays
+// quiet until the user types something. The wait used to demand a *second*
+// chunk after it had begun, so those sessions never became "ready": the wait
+// ran into its ceiling and the injection was skipped for good. The session
+// stayed a plain terminal until the user clicked the paperclip, which is
+// what "it only injects after a while" felt like.
+describe('a shell whose first screen is already complete', () => {
+  test('injects once that screen went quiet', async () => {
+    const addon = makeAddon()
+    const queue = await makeQueue(addon, { remote: true })
+
+    // The whole first screen in one chunk, and then silence.
+    addon.feed()
+    await tick(1500 + 400)
+
+    assert.equal(addon.sent.length, 1, 'the script is typed at the prompt')
+    assert.match(addon.sent[0], /ELECTERM_SHELL_INTEGRATION/)
+    queue.dispose()
+  })
+})
+
+// A remote login draws its banner and its prompt in one go and then stays
+// quiet for good, so the remote wait has to accept the output that arrived
+// *before* it started - otherwise such a session never becomes ready, the wait
+// runs into its ceiling and the injection is skipped for good.
+//
+// A local pty must not: its first bytes are conpty's own init sequences,
+// printed before any prompt exists, and counting them would type the script
+// into a booting console (#4737).
+describe('which output counts as the shell speaking', () => {
+  test("a local shell does not count the output from before the wait", async () => {
+    const { StartupQueue } = await loadQueue()
+    const addon = makeAddon()
+    // conpty's init sequences, printed before any prompt exists.
+    addon.feed()
+    const queue = new StartupQueue({
+      attachAddon: addon,
+      onClose: false,
+      props: { tab: { type: 'local' } },
+      isLocal: () => true,
+      isSsh: () => false
+    })
+    queue.promptReadyTimeoutMs = 300
+    const ready = await queue.waitForFirstPrompt(addon, {
+      quietMs: 100,
+      allowPreExistingOutput: false
+    })
+    assert.equal(ready, false, 'the init bytes are not a prompt')
+    queue.dispose()
+  })
+
+  test('a remote shell counts the output from before the wait', async () => {
+    const { StartupQueue } = await loadQueue()
+    const addon = makeAddon()
+    // The banner and the prompt, in one chunk.
+    addon.feed()
+    const queue = new StartupQueue({
+      attachAddon: addon,
+      onClose: false,
+      props: { tab: { type: 'ssh' } },
+      isLocal: () => false,
+      isSsh: () => true
+    })
+    const ready = await queue.waitForFirstPrompt(addon, {
+      quietMs: 100,
+      allowPreExistingOutput: true
+    })
+    assert.equal(ready, true, 'the screen the shell drew is a prompt')
+    queue.dispose()
+  })
+
+  test('the local session does not use the remote shortcut', async () => {
+    const addon = makeAddon()
+    const calls = []
+    const queue = await makeQueue(addon, {
+      localStart: 'D:\\work',
+      setup: q => {
+        q.waitForFirstPrompt = (a, opts) => {
+          calls.push(opts)
+          return Promise.resolve(true)
+        }
+      }
+    })
+    await tick(50)
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].allowPreExistingOutput, false)
+    queue.dispose()
+  })
+
+  test('the remote session does use it', async () => {
+    const addon = makeAddon()
+    const calls = []
+    const queue = await makeQueue(addon, {
+      remote: true,
+      setup: q => {
+        q.waitForFirstPrompt = (a, opts) => {
+          calls.push(opts)
+          return Promise.resolve(true)
+        }
+      }
+    })
+    await tick(50)
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].allowPreExistingOutput, true)
+    queue.dispose()
+  })
+})
+
+// The probe opens a second channel on the ssh connection. A connection that
+// was just established often needs a moment before the server accepts it,
+// and the probe then times out - which used to end the injection, silently,
+// with nothing on screen to show for it.
+//
+// A probe that *answers* (with a shell, or with nothing shell-like) is a
+// different thing: the device answered, and asking again would only make
+// the session wait longer for an outcome that will not change.
+describe('the remote shell probe', () => {
+  test('is tried again when the channel was not ready yet', async () => {
+    const addon = makeAddon()
+    let attempts = 0
+    const queue = await makeQueue(addon, {
+      remote: true,
+      setup: q => {
+        // The channel is not ready: the probe runs into its ceiling.
+        q.remoteShellDetectTimeoutMs = 300
+        q.remoteShellDetectRetryDelayMs = 50
+      },
+      detectRemoteShell: () => {
+        attempts++
+        // The first attempt never answers - the channel is still opening.
+        if (attempts === 1) {
+          return new Promise(() => {})
+        }
+        return Promise.resolve('bash')
+      }
+    })
+
+    addon.feed()
+    await tick(1500 + 1200)
+
+    assert.equal(attempts, 2, 'the probe was tried again')
+    assert.equal(addon.sent.length, 1, 'and the script was injected after all')
+    queue.dispose()
+  })
+
+  test('is not asked again when the device answered', async () => {
+    const addon = makeAddon()
+    let attempts = 0
+    const queue = await makeQueue(addon, {
+      remote: true,
+      setup: q => {
+        q.remoteShellDetectTimeoutMs = 300
+        q.remoteShellDetectRetryDelayMs = 50
+      },
+      detectRemoteShell: () => {
+        attempts++
+        return Promise.resolve('')
+      }
+    })
+
+    addon.feed()
+    await tick(1500 + 1200)
+
+    assert.equal(attempts, 1, 'an answer is an answer')
+    assert.deepEqual(addon.sent, [], 'nothing was typed into an unknown shell')
+    queue.dispose()
+  })
+
+  test('reports the failure when the shell stays unknown', async () => {
+    const addon = makeAddon()
+    const failures = []
+    const queue = await makeQueue(addon, {
+      remote: true,
+      setup: q => {
+        q.remoteShellDetectTimeoutMs = 300
+        q.remoteShellDetectRetryDelayMs = 50
+      },
+      detectRemoteShell: () => Promise.resolve(''),
+      onInjectionFailed: reason => failures.push(reason)
+    })
+
+    addon.feed()
+    await tick(1500 + 1200)
+
+    assert.deepEqual(failures, ['probe'])
+    assert.deepEqual(addon.sent, [], 'nothing was typed into an unknown shell')
+    queue.dispose()
+  })
+})
+
+// A poll that outlives its queue keeps spinning on the event loop and steals
+// time from everything else - and the next session then waits longer than it
+// has to. The queue therefore has to take its polling timers down with it.
+describe('a queue that is disposed', () => {
+  test('leaves no polling timer behind', async () => {
+    const addon = makeAddon()
+    const queue = await makeQueue(addon, { remote: true })
+
+    await tick(50)
+    assert.ok(queue.intervals.size > 0, 'the wait for the prompt is polling')
+
+    queue.dispose()
+
+    assert.equal(queue.intervals.size, 0, 'the poll was taken down')
   })
 })

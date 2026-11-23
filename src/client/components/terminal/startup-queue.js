@@ -40,7 +40,24 @@ const settleTimeoutMs = 3000
 // Ceiling for the best-effort remote shell probe. detectRemoteShell opens an
 // extra exec channel and runCmd has no timeout of its own, so a server that
 // never answers would otherwise block the whole queue forever.
-const remoteShellDetectTimeoutMs = 3000
+//
+// The ceiling has to sit well above the time the *server* is willing to wait
+// for that channel (15s, see session-common.js): a connection that was just
+// established often needs a couple of seconds before the sshd accepts a
+// second channel, and a ceiling below that turned the probe into a coin
+// toss. An empty answer then ended the injection - silently, with nothing
+// on screen to show for it - and the session stayed a plain terminal until
+// the user clicked the paperclip, which is what "it only injects after a
+// while" felt like.
+const remoteShellDetectTimeoutMs = 6000
+// A probe that came back empty is usually a channel that was not ready yet,
+// not a device that can not run a shell. One more attempt a moment later
+// recovers the sessions that would otherwise never get the integration.
+const remoteShellDetectRetryDelayMs = 600
+const remoteShellDetectMaxAttempts = 2
+// How often the wait for the shell's first prompt is tried before the
+// injection is given up on.
+const promptReadyMaxAttempts = 2
 // Shell integration injection window. `injectionQuietMs` of silence from the
 // shell without an OSC 633 confirmation means the prompt will not report its
 // cwd, and `injectionMaxWaitMs` is the ceiling for a shell that never answers
@@ -65,6 +82,9 @@ export class StartupQueue {
   constructor (term, deps = {}) {
     this.term = term
     this.detectRemoteShell = deps.detectRemoteShell || (() => Promise.resolve('sh'))
+    // Told when the injection did not happen at all, so the host can say
+    // so instead of leaving a grey icon behind. See injectShellIntegration.
+    this.onInjectionFailed = deps.onInjectionFailed
     this.queue = []
     this.token = 0
     this.running = false
@@ -72,11 +92,22 @@ export class StartupQueue {
     this.shellType = null
     // True while an injection is in flight; see injectShellIntegration.
     this.shellIntegrationPending = false
+    // Why the last injection attempt did not happen ('' = it did). See
+    // injectShellIntegration.
+    this.shellInjectionError = ''
     this.timers = new Set()
+    // The polling intervals are kept apart from the timeouts: they need
+    // clearInterval, and a queue that was disposed must not keep a timer
+    // running - a poll that outlives its queue spins on the event loop and
+    // steals time from everything else.
+    this.intervals = new Set()
     // Timings of the "is the shell listening yet?" wait (see
     // waitForFirstPrompt). Instance fields so a test can shorten them.
     this.promptReadyQuietMs = promptReadyQuietMs
     this.promptReadyTimeoutMs = promptReadyTimeoutMs
+    // Timings of the remote shell probe (see detectRemoteShellType).
+    this.remoteShellDetectTimeoutMs = remoteShellDetectTimeoutMs
+    this.remoteShellDetectRetryDelayMs = remoteShellDetectRetryDelayMs
   }
 
   dispose = () => {
@@ -84,6 +115,10 @@ export class StartupQueue {
       clearTimeout(t)
     }
     this.timers.clear()
+    for (const i of this.intervals) {
+      clearInterval(i)
+    }
+    this.intervals.clear()
     this.queue = []
     this.running = false
   }
@@ -153,17 +188,31 @@ export class StartupQueue {
    * ready either - the first bytes a pty sends are conpty's own init sequences,
    * printed before any prompt exists.
    *
+   * Output that arrived *before* the wait started counts as well - but only
+   * where that is safe. A remote login draws its banner and its prompt in
+   * one go, and then goes quiet for good: demanding another chunk after the
+   * wait began meant that such a session never became ready, the wait ran
+   * into its ceiling and the injection was skipped for good. Nothing would
+   * have woken the shell up either - it stays quiet until the user types
+   * something.
+   *
+   * A *local* shell must not use that shortcut: the first bytes a pty
+   * sends are conpty's own init sequences, printed before any prompt
+   * exists, so they say nothing about the shell being ready to be typed
+   * into. There the first chunk is only the start of the wait, and the
+   * prompt has to arrive as a chunk of its own.
+   *
    * Returns false when the terminal went away or the shell never settled, in
    * which case the caller must not type anything at all.
    */
-  waitForFirstPrompt = (addon, { quietMs = this.promptReadyQuietMs, timeoutMs = this.promptReadyTimeoutMs } = {}) => {
+  waitForFirstPrompt = (addon, { quietMs = this.promptReadyQuietMs, timeoutMs = this.promptReadyTimeoutMs, allowPreExistingOutput = false } = {}) => {
     if (this.isClosed() || !addon || addon.disposed) {
       return Promise.resolve(false)
     }
     return new Promise((resolve) => {
       const startedAt = Date.now()
       let last = addon.getLastOutputTime ? addon.getLastOutputTime() : startedAt
-      let sawOutput = this.isSsh() && addon.hasReceivedInitialData
+      let sawOutput = allowPreExistingOutput && !!addon.hasReceivedInitialData
       let done = false
       const finish = (result) => {
         if (done) {
@@ -171,6 +220,7 @@ export class StartupQueue {
         }
         done = true
         clearInterval(pollTimer)
+        this.intervals.delete(pollTimer)
         resolve(result)
       }
       const pollTimer = setInterval(() => {
@@ -190,7 +240,140 @@ export class StartupQueue {
           finish(false)
         }
       }, 100)
+      this.intervals.add(pollTimer)
     })
+  }
+
+  /**
+   * Wait for the shell's first prompt, and try again when it did not settle.
+   *
+   * The first attempt can lose the race against a shell that was still
+   * drawing its first screen: the wait gave up while the prompt was on its
+   * way, and the injection was skipped. One more attempt costs a couple of
+   * seconds and turns that session into a working one.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 15:08:36
+   * @param {object} addon - The attach addon of this session
+   * @returns {Promise<boolean>} true when the shell has a prompt
+   */
+  waitForShellPrompt = async (addon) => {
+    for (let attempt = 0; attempt < promptReadyMaxAttempts; attempt++) {
+      // The shell has to have said *something* before "it is quiet" means
+      // anything: a shell that is still booting is silent too, and a script
+      // typed into it does not echo until the console finally starts. So the
+      // first output is a gate of its own, and only after it arrived does the
+      // silence below carry any meaning.
+      const spoke = await this.waitForInitialOutput(addon)
+      if (!spoke) {
+        return false
+      }
+      // The remote case has to accept the output that arrived *before* this
+      // wait started: a remote login draws its banner and its prompt in one
+      // go and then stays quiet for good, so demanding a fresh chunk meant
+      // that such a session never became ready and the injection was skipped
+      // for good. A local shell must not - its first bytes are conpty's init
+      // sequences, printed before any prompt exists, and treating them as
+      // "the shell spoke" would type the script into a booting console
+      // (#4737).
+      const remote = this.isRemoteShell()
+      const ready = await this.waitForFirstPrompt(addon, {
+        quietMs: remote ? 1500 : this.promptReadyQuietMs,
+        allowPreExistingOutput: remote
+      })
+      if (ready) {
+        return true
+      }
+      if (this.isClosed() || this.addon !== addon || addon.disposed) {
+        return false
+      }
+    }
+    return false
+  }
+
+  /**
+   * Wait until the shell has produced its first output.
+   *
+   * Resolves false when the session went away instead of hanging forever.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 15:33:12
+   * @param {object} addon - The attach addon of this session
+   * @returns {Promise<boolean>} true when the shell said something
+   */
+  waitForInitialOutput = (addon) => {
+    if (this.isClosed() || !addon || addon.disposed) {
+      return Promise.resolve(false)
+    }
+    // The addon knows whether it already received data: the first chunk may
+    // have arrived before this wait was even started.
+    if (addon.hasReceivedInitialData) {
+      return Promise.resolve(true)
+    }
+    return new Promise((resolve) => {
+      let done = false
+      const finish = (result) => {
+        if (done) {
+          return
+        }
+        done = true
+        clearTimeout(timer)
+        this.timers.delete(timer)
+        resolve(result)
+      }
+      const timer = setTimeout(() => finish(false), this.promptReadyTimeoutMs)
+      this.timers.add(timer)
+      addon.onInitialData(() => finish(true))
+    })
+  }
+
+  /**
+   * Find out which shell the far side runs.
+   *
+   * The probe opens a second channel on the ssh connection, and a connection
+   * that was just established often needs a moment before the server accepts
+   * it. An empty answer therefore does not mean "there is no shell here" - it
+   * means the channel was not ready yet, and giving up on the first empty
+   * answer skipped the injection for good.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 15:09:48
+   * @returns {Promise<string>} the shell type, or '' when it stays unknown
+   */
+  detectRemoteShellType = async () => {
+    for (let attempt = 0; attempt < remoteShellDetectMaxAttempts; attempt++) {
+      if (attempt > 0) {
+        await this.sleep(this.remoteShellDetectRetryDelayMs)
+        if (this.isClosed()) {
+          return ''
+        }
+      }
+      let timer = null
+      let timedOut = false
+      const shellType = await Promise.race([
+        this.detectRemoteShell(this.term.pid),
+        new Promise(resolve => {
+          timer = setTimeout(() => {
+            timedOut = true
+            resolve('')
+          }, this.remoteShellDetectTimeoutMs)
+          this.timers.add(timer)
+        })
+      ])
+      clearTimeout(timer)
+      this.timers.delete(timer)
+      if (shellType) {
+        return shellType
+      }
+      if (!timedOut) {
+        // The probe answered - it just did not name a shell. That is an
+        // answer, not a broken channel: a device that refuses the exec
+        // channel has no shell to integrate. Retrying would only make the
+        // session wait longer for an outcome that will not change.
+        return ''
+      }
+    }
+    return ''
   }
 
   /**
@@ -300,6 +483,7 @@ export class StartupQueue {
     // shell that is still booting, without waiting for its prompt.
     this.shellInjected = false
     this.shellType = null
+    this.shellInjectionError = ''
 
     if (this.canInjectShellIntegration()) {
       this.queue.push({
@@ -517,6 +701,12 @@ export class StartupQueue {
       // manager only starts following after the user runs a command.
       if (typedByUs) {
         this.requestFreshPrompt(addon)
+      } else if (this.shellInjectionError) {
+        // Nothing was injected and the server did not inject it either:
+        // the session stays a plain terminal. Say so - otherwise the user
+        // only sees a grey paperclip and no hint about why the file
+        // manager does not follow the shell.
+        this.onInjectionFailed?.(this.shellInjectionError)
       }
     } finally {
       this.shellIntegrationPending = false
@@ -534,16 +724,18 @@ export class StartupQueue {
    *   already or nothing was injected at all
    */
   _doInjectShellIntegration = async (addon) => {
+    // Wait for the shell's first prompt right away, in parallel with the
+    // probe below. The two do not depend on each other, and running them in
+    // series meant that the injection could only start after the probe had
+    // answered *and* the shell had been quiet for a while - which is what
+    // "it only injects after a while" felt like.
+    const promptReady = this.waitForShellPrompt(addon)
+
     let shellType
     if (this.isLocal()) {
       shellType = this.getLocalShellType()
     } else if (this.isRemoteShell()) {
-      shellType = await Promise.race([
-        this.detectRemoteShell(this.term.pid),
-        new Promise(resolve => {
-          setTimeout(() => resolve(''), remoteShellDetectTimeoutMs)
-        })
-      ])
+      shellType = await this.detectRemoteShellType()
     }
 
     // '' means the far side never said what shell it runs: the probe channel
@@ -551,6 +743,7 @@ export class StartupQueue {
     // `sh` in that case is exactly what typed the script into a switch - skip
     // instead, and let the session stay a plain terminal.
     if (!shellType) {
+      this.shellInjectionError = 'probe'
       return false
     }
 
@@ -570,7 +763,7 @@ export class StartupQueue {
     // so "the server injected" and "do not type" can not disagree.
     if (this.isSpawnInjectedShell(shellType)) {
       this.shellInjected = true
-      await this.waitForFirstPrompt(this.addon)
+      await promptReady
       // The server injected it at spawn time: the shell already reports its
       // directory from every prompt, no extra one is needed.
       return false
@@ -612,6 +805,7 @@ export class StartupQueue {
         }
         done = true
         clearInterval(pollTimer)
+        this.intervals.delete(pollTimer)
         pollTimer = null
         // true: the script was typed into the shell, so the caller has to
         // ask for a fresh prompt to get the directory report.
@@ -637,90 +831,88 @@ export class StartupQueue {
         finish()
       }
 
-      // Wait for initial data (prompt/banner) to arrive before injecting
-      addon.onInitialData(() => {
+      // The wait for the shell's first prompt started together with the
+      // probe, so it is normally already resolved by now. Nothing is typed
+      // until the shell is actually listening, so no keystroke can sit in
+      // the console buffer and be drawn after the suppression window is
+      // gone. A remote login banner trickles over the network, so its
+      // "quiet" has to be longer - typing into a half-drawn login prompt is
+      // how a password ends up in a log.
+      promptReady.then((ready) => {
         if (done || this.addon !== addon || addon.disposed) {
           return finish()
         }
-        // And then wait for the prompt those bytes were not: see
-        // waitForFirstPrompt. Nothing is typed until the shell is actually
-        // listening, so no keystroke can sit in the console buffer and be
-        // drawn after the suppression window is gone. A remote login banner
-        // trickles over the network, so its "quiet" has to be longer - typing
-        // into a half-drawn login prompt is how a password ends up in a log.
-        this.waitForFirstPrompt(addon, {
-          quietMs: this.isRemoteShell() ? 1500 : this.promptReadyQuietMs
-        }).then((ready) => {
-          if (done || this.addon !== addon || addon.disposed) {
-            return finish()
-          }
-          if (!ready || (this.isSsh() && addon._lineHasUnsubmittedInput?.())) {
-            // Booting shell, or one that never settles. Skip the injection:
-            // a plain terminal is a far better outcome than a screen full of
-            // script.
-            return finish()
-          }
-          const startedAt = Date.now()
-          // A remote shell answers across the network, so its silence is worth
-          // more than a local one's: one slow round trip must not read as "the
-          // prompt will never confirm".
-          const quietMs = this.isRemoteShell() ? 2500 : injectionQuietMs
-          let sawOutput = false
-          let lastSeen = startedAt
+        // An SSH prompt may already carry typed input. Injecting a script on
+        // top of a half-typed command would corrupt it, so skip this session
+        // and keep the plain terminal instead.
+        if (!ready || (this.isSsh() && addon._lineHasUnsubmittedInput?.())) {
+          // Booting shell, or one that never settles. Skip the injection:
+          // a plain terminal is a far better outcome than a screen full of
+          // script.
+          this.shellInjectionError = 'prompt'
+          return finish()
+        }
+        const startedAt = Date.now()
+        // A remote shell answers across the network, so its silence is worth
+        // more than a local one's: one slow round trip must not read as "the
+        // prompt will never confirm".
+        const quietMs = this.isRemoteShell() ? 2500 : injectionQuietMs
+        let sawOutput = false
+        let lastSeen = startedAt
 
-          // The deadline is measured from the last chunk the shell sent, not
-          // from the moment we typed: a shell that has not answered yet has not
-          // read the command, so hiding a little longer costs nothing, while an
-          // elapsed-time deadline expires *before* the shell even echoes -
-          // PowerShell can take seconds to draw its very first prompt (conpty +
-          // profile load), which is precisely how the injection ended up on
-          // screen. Once the shell does answer, `quietMs` of silence without an
-          // OSC 633 confirmation means the prompt will never report the cwd
-          // (wrapped too early, or the user's profile replaced `prompt`
-          // afterwards), so give up instead of hiding output indefinitely.
-          pollTimer = setInterval(() => {
-            if (done) {
-              return
-            }
-            if (this.addon !== addon || addon.disposed) {
-              return giveUp()
-            }
-            const now = Date.now()
-            const last = addon.getLastOutputTime()
-            if (last > lastSeen) {
-              lastSeen = last
-              sawOutput = true
-            }
-            // The addon ended the window itself - OSC 633 was seen.
-            if (!addon.outputSuppressed) {
-              return
-            }
-            if (!sawOutput) {
-              if (now - startedAt >= injectionMaxWaitMs) {
-                giveUp()
-              }
-              return
-            }
-            if (now - lastSeen >= quietMs) {
+        // The deadline is measured from the last chunk the shell sent, not
+        // from the moment we typed: a shell that has not answered yet has not
+        // read the command, so hiding a little longer costs nothing, while an
+        // elapsed-time deadline expires *before* the shell even echoes -
+        // PowerShell can take seconds to draw its very first prompt (conpty +
+        // profile load), which is precisely how the injection ended up on
+        // screen. Once the shell does answer, `quietMs` of silence without an
+        // OSC 633 confirmation means the prompt will never report the cwd
+        // (wrapped too early, or the user's profile replaced `prompt`
+        // afterwards), so give up instead of hiding output indefinitely.
+        pollTimer = setInterval(() => {
+          if (done) {
+            return
+          }
+          if (this.addon !== addon || addon.disposed) {
+            return giveUp()
+          }
+          const now = Date.now()
+          const last = addon.getLastOutputTime()
+          if (last > lastSeen) {
+            lastSeen = last
+            sawOutput = true
+          }
+          // The addon ended the window itself - OSC 633 was seen.
+          if (!addon.outputSuppressed) {
+            return
+          }
+          if (!sawOutput) {
+            if (now - startedAt >= injectionMaxWaitMs) {
               giveUp()
             }
-          }, 200)
+            return
+          }
+          if (now - lastSeen >= quietMs) {
+            giveUp()
+          }
+        }, 200)
+        this.intervals.add(pollTimer)
 
-          // Start suppressing output before sending the integration command.
-          // This hides the command and its output until OSC 633 is detected.
-          // The addon's own timer is only a backstop: the poll above decides.
-          // Marked before the suppression window opens: the window may end
-          // synchronously, and the caller has to know that the script went
-          // into the shell even then.
-          typed = true
-          addon.startOutputSuppression(injectionMaxWaitMs + 2000, () => {
-            if (!gaveUp && !addon.disposed) {
-              this.shellInjected = true
-            }
-            finish()
-          }, true)
-          addon._sendData(integrationCmd)
-        })
+        // Start suppressing output before sending the integration command.
+        // This hides the command and its output until OSC 633 is detected.
+        // The addon's own timer is only a backstop: the poll above decides.
+        // Marked before the suppression window opens: the window may end
+        // synchronously, and the caller has to know that the script went
+        // into the shell even then.
+        typed = true
+        addon.startOutputSuppression(injectionMaxWaitMs + 2000, () => {
+          if (!gaveUp && !addon.disposed) {
+            this.shellInjected = true
+          }
+          finish()
+        }, true)
+        addon._sendData(integrationCmd)
       })
     })
   }
