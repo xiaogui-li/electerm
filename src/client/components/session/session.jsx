@@ -27,6 +27,7 @@ import {
 import { refs } from '../common/ref'
 import sanitizeFilename from '../../common/sanitize-filename.js'
 import { getRightClickBehavior } from '../../common/right-click-behavior.js'
+import { resolveSftpFollowState } from '../../common/sftp-follow-state.js'
 import SessionControl from './session-control'
 import NativeRdpSession from '../rdp/native-rdp-session.jsx'
 import { isNativeRdpTab } from '../rdp/native-rdp.js'
@@ -186,6 +187,25 @@ export default class SessionWrapper extends Component {
     this.setState(prevState => ({
       sftpPathFollowSsh: !prevState.sftpPathFollowSsh
     }))
+  }
+
+  /**
+   * The state of the follow toggle, for the toolbar icon.
+   *
+   * The icon has to tell "off" from "on but the shell never reported a
+   * directory": with the toggle on and no directory, the file manager stays
+   * in the home directory, and an icon that looks the same as the working
+   * state hides that.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 11:26:30
+   * @returns {string} one of sftpFollowStates
+   */
+  getSftpFollowState = () => {
+    return resolveSftpFollowState({
+      enabled: this.state.sftpPathFollowSsh,
+      cwd: this.state.cwd
+    })
   }
 
   editTab = (up) => {
@@ -640,7 +660,7 @@ export default class SessionWrapper extends Component {
           isSshDisabled={this.isSshDisabled()}
           isNotTerminalType={this.isNotTerminalType()}
           canSplitView={this.canSplitView()}
-          sftpPathFollowSsh={this.state.sftpPathFollowSsh}
+          sftpFollowState={this.getSftpFollowState()}
           keepaliveEnabled={!!this.props.tab.keepaliveEnabled}
           broadcastInput={this.state.broadcastInput}
           wrapDisabled={this.state.wrapDisabled}

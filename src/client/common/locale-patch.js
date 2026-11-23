@@ -27,7 +27,11 @@ const zhCn = {
   keepaliveMode: 'Keepalive 模式',
   keepaliveModeInherit: '跟随全局设置',
   keepaliveModeOn: '总是开启',
-  keepaliveModeOff: '总是关闭'
+  keepaliveModeOff: '总是关闭',
+  // the SFTP follow toggle can be on while the shell never reports its
+  // working directory, so the icon needs a text of its own for that state
+  sftpFollowSshPending: 'SFTP 路径跟随已开启，正在等待终端上报当前目录；若一直不变，说明 shell integration 没生效',
+  sftpFollowSshNotWorking: 'SFTP 路径跟随已开启，但终端没有上报当前目录，路径不会自动跟随'
 }
 
 const enUs = {
@@ -43,7 +47,9 @@ const enUs = {
   keepaliveMode: 'keepalive mode',
   keepaliveModeInherit: 'follow the global setting',
   keepaliveModeOn: 'always on',
-  keepaliveModeOff: 'always off'
+  keepaliveModeOff: 'always off',
+  sftpFollowSshPending: 'SFTP path follow is on, waiting for the terminal to report its current directory; if it stays like this, the shell integration did not activate',
+  sftpFollowSshNotWorking: 'SFTP path follow is on, but the terminal is not reporting its current directory, so the path will not follow'
 }
 
 // languages without a local translation fall back to English: a readable

@@ -248,16 +248,25 @@ export const suggestionsMixin = {
     return this.cmdAddon.getCurrentCommand()
   },
 
+  /**
+   * The live working directory the shell reported.
+   *
+   * It arrives either as the OSC 633 `P;Cwd=` property (electerm's own
+   * shell integration) or as the OSC 1337 `CurrentDir` key (iTerm2's
+   * convention). Both are real path reports, so the shell-integration flag
+   * must not gate them: OSC 1337 never sets that flag, yet the path it
+   * reports is just as good.
+   *
+   * @author xiaogui
+   * @since 2026-11-23 11:20:02
+   * @returns {string} The path, or '' when nothing has been reported yet
+   */
   getCwd () {
-    // Use shell integration CWD if available
-    if (this.cmdAddon && this.cmdAddon.hasShellIntegration()) {
-      const cwd = this.cmdAddon.getCwd()
-      if (cwd) {
-        this.setCwd(cwd)
-        return cwd
-      }
+    const cwd = this.cmdAddon?.getCwd()
+    if (cwd) {
+      this.setCwd(cwd)
+      return cwd
     }
-    // Fallback: no longer needed with shell integration
     return ''
   },
 

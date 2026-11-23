@@ -79,6 +79,10 @@
   margin-right 10px
   &.active
     color var(--warn)
+  // the SFTP follow toggle is on, but the shell has not reported a working
+  // directory yet - dimmed so it does not read like the working state
+  &.pending
+    color var(--text-dark)
 
 .wrap-toggle-icon
 .split-view-toggle

@@ -131,3 +131,77 @@ describe('OSC 633 value unescaping', () => {
     assert.equal(new CommandTrackerAddon()._deserializeOscValue(escaped), path)
   })
 })
+
+// OSC 1337 is iTerm2's own protocol. Its CurrentDir key carries the working
+// directory, so a host that already reports it (a profile copied from iTerm2,
+// or any tool following the iTerm2 convention) drives the SFTP follow feature
+// on its own - electerm does not have to inject anything for it.
+//
+// @author xiaogui
+// @since 2026-11-23 11:36:40
+describe('OSC 1337 CurrentDir', () => {
+  const feed = async (data) => {
+    const { CommandTrackerAddon } = await loadTracker()
+    const addon = new CommandTrackerAddon()
+    const seen = []
+    addon.onCwdChanged(cwd => seen.push(cwd))
+    const handled = addon._handleOsc1337(data)
+    return { addon, seen, handled }
+  }
+
+  test('reads the directory out of the iTerm2 payload', async () => {
+    const { addon, seen, handled } = await feed('CurrentDir=/tmp/work')
+    assert.equal(handled, true)
+    assert.equal(addon.getCwd(), '/tmp/work')
+    assert.deepEqual(seen, ['/tmp/work'])
+  })
+
+  test('ignores the other iTerm2 keys', async () => {
+    const { addon } = await feed('CurrentDir=/tmp;ShellIntegrationVersion=1')
+    assert.equal(addon.getCwd(), '/tmp')
+  })
+
+  // iTerm2 sends the path raw, unlike the OSC 633 value which the shell side
+  // escapes - so a backslash has to survive as a backslash.
+  test('keeps the path raw, unlike the escaped OSC 633 value', async () => {
+    const { addon } = await feed('CurrentDir=D:\\x86\\build')
+    assert.equal(addon.getCwd(), 'D:\\x86\\build')
+  })
+
+  test('does nothing without a CurrentDir key', async () => {
+    const { addon, seen, handled } = await feed('ShellIntegrationVersion=1')
+    assert.equal(handled, false)
+    assert.equal(addon.getCwd(), '')
+    assert.deepEqual(seen, [])
+  })
+})
+
+// A server profile that exports PROMPT_COMMAND passes it down to every nested
+// shell, but shell functions are never inherited - so the nested shell would
+// run a PROMPT_COMMAND calling `__e_cmd`, which it does not have: "command
+// not found" before every prompt, and no OSC 633 at all, so the SFTP follow
+// silently stops there. Exporting the functions keeps it working.
+//
+// @author xiaogui
+// @since 2026-11-23 11:37:25
+describe('bash shell integration', () => {
+  test('exports the functions so nested shells inherit them', async () => {
+    const { getInlineShellIntegration } = await load()
+    const cmd = getInlineShellIntegration('bash')
+    assert.ok(
+      cmd.includes('export -f __e_esc __e_pre __e_cmd'),
+      'exports the functions'
+    )
+    assert.ok(
+      cmd.indexOf('__e_cmd() {') < cmd.indexOf('export -f'),
+      'defines them before exporting them'
+    )
+  })
+
+  test('the exported functions survive the one-liner joining', async () => {
+    const { getShellIntegrationCommand } = await load()
+    const cmd = getShellIntegrationCommand('bash')
+    assert.ok(cmd.includes('export -f __e_esc __e_pre __e_cmd'))
+    assert.ok(cmd.endsWith('\r'))
+  })
+})
