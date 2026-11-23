@@ -502,7 +502,20 @@ if (type === 'rdp') {
               // This is a protocol-level byte sequence, not typed input, so it
               // bypasses any tx line-ending rewriting - the same reason XMODEM
               // data goes through writeRaw.
-              const wake = '\n\r\x1b[K'
+              //
+              // The newline alone is enough, and the trailing '\r\x1b[K' that
+              // used to follow it was actively harmful:
+              //  - the CR is a second line terminator (ICRNL turns it into a
+              //    newline), so one heartbeat made bash accept *two* empty
+              //    lines and redraw the prompt twice;
+              //  - the 'ESC [ K' stayed in the tty input buffer, because only
+              //    a newline ends a canonical line - it was then delivered to
+              //    readline as part of the *next* command line and rang the
+              //    "unbound key" bell.
+              // Measured against a real bash in a real pty: '\n' alone gives
+              // one prompt redraw and no bell, '\n\r\x1b[K' gives two
+              // redraws and a bell.
+              const wake = '\n'
               if (typeof term.writeRaw === 'function') {
                 term.writeRaw(wake)
               } else {
