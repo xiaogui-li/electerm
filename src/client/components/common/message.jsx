@@ -5,6 +5,7 @@ import {
 } from '@ant-design/icons'
 import classnames from 'classnames'
 import generateId from '../../common/uid'
+import { resolveMessageId } from '../../common/message-id.js'
 import { messageIcons } from '../../common/icon-helpers.jsx'
 import './message.styl'
 
@@ -28,16 +29,25 @@ let activeMessages = []
 function MessageItem ({ id, type, content, duration, onRemove, timestamp }) {
   const timeoutIdRef = useRef(null)
 
+  // The remove callback is a new function on every render of the container.
+  // It cannot be an effect dependency: a fresh reference would clear the
+  // running timer and start a new countdown every time the container
+  // re-rendered, and every message on screen would keep its full lifetime
+  // instead of expiring. The latest callback is kept in a ref instead, so
+  // the countdown only depends on the message itself.
+  const onRemoveRef = useRef(onRemove)
+  onRemoveRef.current = onRemove
+
   useEffect(() => {
     if (duration !== 0) {
-      const timer = setTimeout(onRemove, duration * 1000)
+      const timer = setTimeout(() => onRemoveRef.current(), duration * 1000)
       timeoutIdRef.current = timer
       return () => {
         clearTimeout(timeoutIdRef.current)
         timeoutIdRef.current = null
       }
     }
-  }, [duration, onRemove, timestamp])
+  }, [duration, timestamp])
 
   const handleMouseEnter = () => {
     if (timeoutIdRef.current) {
@@ -48,7 +58,7 @@ function MessageItem ({ id, type, content, duration, onRemove, timestamp }) {
 
   const handleMouseLeave = () => {
     if (duration !== 0) {
-      const timer = setTimeout(onRemove, duration * 1000)
+      const timer = setTimeout(() => onRemoveRef.current(), duration * 1000)
       timeoutIdRef.current = timer
     }
   }
@@ -120,7 +130,13 @@ const addMessage = (type, content, duration = 3, onClose) => {
     }
   }
   init()
-  const id = config.key || generateId()
+  // A React element carries its key outside of its props. Reusing that key
+  // lets the same message replace the one already on screen instead of
+  // stacking a second copy of it - several terminals reporting the same
+  // problem at once would otherwise pile up copies that each have to be
+  // closed one by one.
+  const elementKey = React.isValidElement(content) ? content.key : null
+  const id = resolveMessageId(config, elementKey) || generateId()
   const existingIndex = activeMessages.findIndex(m => m.id === id)
   const newMessage = {
     ...config,
