@@ -9,7 +9,6 @@ const {
   dialog,
   powerMonitor,
   globalShortcut,
-  shell,
   webContents
 } = require('electron')
 const globalState = require('./glob-state')
@@ -72,7 +71,6 @@ const {
   packInfo,
   appPath,
   isDev,
-  isMac,
   exePath,
   isPortable,
   sshKeysPath
@@ -189,20 +187,19 @@ async function initAppServer () {
   config.language = language
   globalState.set('langMap', langMap)
   if (!globalState.get('serverInited')) {
-    const child = await initServer(config, {
+    // The upgrade downloader used to ask the main process to reveal the
+    // installer in the temp folder, which popped a File Explorer window over
+    // the install wizard. It now launches the installer directly, so there
+    // is no child message to listen for here.
+    // @author xiaogui
+    // @since 2026-11-25 13:10:21
+    await initServer(config, {
       ...process.env,
       widgetRoot: getUserWidgetDir(),
       widgetAppOrigin: `http://127.0.0.1:${isDev ? process.env.devPort || 5570 : config.port}`,
       appPath,
       sshKeysPath
     }, sysLocale)
-    child.on('message', (m) => {
-      if (m && m.showFileInFolder) {
-        if (!isMac) {
-          shell.showItemInFolder(m.showFileInFolder)
-        }
-      }
-    })
     globalState.set('serverInited', true)
   }
   globalState.set('config', config)

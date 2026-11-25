@@ -178,10 +178,12 @@ class Upgrade {
       // opening the installer (mounting a dmg, showing Finder) would steal
       // GUI focus on CI runners and break every test that runs afterwards.
       if (!process.env.NODE_TEST) {
+        // Launch the installer directly. Do not also reveal the temp folder:
+        // that left a File Explorer window on top of the install wizard and
+        // made the update look like it had only downloaded a file.
+        // @author xiaogui
+        // @since 2026-11-25 13:09:48
         openFile(this.localPath)
-        process.send({
-          showFileInFolder: this.localPath
-        })
       }
       ws.s({
         id: 'transfer:end:' + id,
