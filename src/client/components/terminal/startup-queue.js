@@ -518,16 +518,27 @@ export class StartupQueue {
    * Inserting - instead of firing it off immediately - keeps it serialized
    * against anything still queued and guarantees a single drain loop.
    */
+  /**
+   * Put a shell integration injection at the head of the queue.
+   * Inserting - instead of firing it off immediately - keeps it serialized
+   * against anything still queued and guarantees a single drain loop.
+   *
+   * @author xiaogui
+   * @since 2026-11-25 11:08:38
+   * @param {boolean} sendEnter - Request a fresh prompt when enabling path
+   *   following after the injection already happened
+   * @returns {void}
+   */
   enqueueShellIntegration = (sendEnter) => {
     this.queue.unshift({
       type: 'shell_integration',
       execute: async () => {
-        await this.injectShellIntegration()
-        // A fresh prompt makes the shell emit OSC 633 ;P Cwd= right away, so
-        // the file manager picks the current path up without waiting for the
-        // user's next command.
-        if (sendEnter && this.shellInjected && this.addon && !this.addon._lineHasUnsubmittedInput?.()) {
-          this.addon._sendData('\r')
+        const injected = await this.injectShellIntegration()
+        // A fresh prompt makes the shell emit OSC 633 ;P Cwd= right away.
+        // injectShellIntegration already requested one when it did the
+        // injection itself; only a later toggle needs one from here.
+        if (sendEnter && !injected && this.shellInjected && this.addon) {
+          this.requestFreshPrompt(this.addon)
         }
       }
     })
@@ -675,15 +686,20 @@ export class StartupQueue {
    * Replaces the server-side `source xxx.xxx` approach; output suppression
    * hides the injection command. Resolves when injection is complete - or
    * when it is given up on, never hangs.
+   *
+   * @author xiaogui
+   * @since 2026-11-25 11:08:38
+   * @returns {Promise<boolean>} true when this call typed the script itself
+   *   and already asked for a fresh prompt; false when nothing new was done
    */
   injectShellIntegration = async () => {
     if (this.shellInjected) {
-      return
+      return false
     }
 
     const addon = this.addon
     if (!addon) {
-      return
+      return false
     }
 
     // Mark the injection as running. The caller uses the flag to tell
@@ -699,6 +715,8 @@ export class StartupQueue {
       // the client. Ask for a fresh prompt to get that report - without it
       // the directory the shell just reported stays hidden and the file
       // manager only starts following after the user runs a command.
+      // Only do this once: enqueueShellIntegration used to send a second
+      // Enter here as well, which drew two prompts.
       if (typedByUs) {
         this.requestFreshPrompt(addon)
       } else if (this.shellInjectionError) {
@@ -708,6 +726,7 @@ export class StartupQueue {
         // manager does not follow the shell.
         this.onInjectionFailed?.(this.shellInjectionError)
       }
+      return !!typedByUs
     } finally {
       this.shellIntegrationPending = false
     }
@@ -934,7 +953,7 @@ export class StartupQueue {
    * program), where a stray Enter is worse than a bare line.
    *
    * @author xiaogui
-   * @since 2026-11-23 12:39:50
+   * @since 2026-11-25 11:08:38
    * @param {object} addon - The attach addon of this session
    */
   requestFreshPrompt = (addon) => {
